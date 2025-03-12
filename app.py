@@ -590,7 +590,7 @@ def main():
             # Check if location is being requested
             if st.session_state.pending_location:
                 value = st.session_state.pending_location.get('value')
-                simple_geolocation(value)
+                simple_geolocation_component(value)
             else:
                 st.write("## Values to enrich")
                 
