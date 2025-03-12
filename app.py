@@ -195,7 +195,7 @@ def handle_camera_capture(key, image_data=None, cancelled=False):
         except Exception as e:
             st.error(f"Error processing image: {e}")
 
-# Custom camera component with front/back switch - SIMPLIFIED VERSION
+# Custom camera component with front/back switch - FIXED VERSION
 def custom_camera_input(value, key):
     # Only display camera if it's active for this value
     if st.session_state.camera_active.get(value, False):
@@ -206,9 +206,8 @@ def custom_camera_input(value, key):
             # Create a unique key for this camera instance
             camera_key = f"cam_{value}"
             
-            # Use HTML component for custom camera
-            st.components.v1.html(
-                f"""
+            # Use HTML component for custom camera - FIXED SYNTAX
+            st.components.v1.html("""
                 <div style="text-align: center;">
                     <div id="camera-container" style="width: 100%; margin: 0 auto;">
                         <video id="video" autoplay style="width: 100%; max-height: 300px; object-fit: cover; border-radius: 8px;"></video>
@@ -258,7 +257,7 @@ def custom_camera_input(value, key):
                     
                     // Start camera
                     async function startCamera() {
-                        // Stop any existing stream
+                        // Stop any previous stream
                         if (stream) {
                             stream.getTracks().forEach(track => track.stop());
                         }
@@ -315,7 +314,7 @@ def custom_camera_input(value, key):
                             window.parent.postMessage({
                                 type: "streamlit:setComponentValue", 
                                 value: {
-                                    key: "{camera_key}",
+                                    key: "cam_""" + value + """",
                                     cancelled: true
                                 }
                             }, "*");
@@ -337,7 +336,7 @@ def custom_camera_input(value, key):
                             window.parent.postMessage({
                                 type: "streamlit:setComponentValue", 
                                 value: {
-                                    key: "{camera_key}",
+                                    key: "cam_""" + value + """",
                                     imageData: base64Data
                                 }
                             }, "*");
@@ -347,8 +346,8 @@ def custom_camera_input(value, key):
                     // Start camera on load
                     startCamera();
                 </script>
-                """, 
-                height=450
+            """, 
+            height=450
             )
             
             # Check if we got data from the component
