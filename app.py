@@ -1,4 +1,6 @@
 import streamlit as st
+import pandas as pd
+from datetime import datetime
 from streamlit_js_eval import get_geolocation
 
 st.title("Simple Location App")
@@ -23,3 +25,18 @@ if st.session_state.location_data and 'coords' in st.session_state.location_data
     longitude = coords['longitude']
     
     st.success(f"Location: {latitude:.6f}, {longitude:.6f}")
+    
+    # Create CSV for download
+    df = pd.DataFrame({
+        'Latitude': [latitude],
+        'Longitude': [longitude],
+        'Timestamp': [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+    })
+    
+    csv = df.to_csv(index=False)
+    st.download_button(
+        label="Download CSV",
+        data=csv,
+        file_name="my_location.csv",
+        mime="text/csv"
+    )
