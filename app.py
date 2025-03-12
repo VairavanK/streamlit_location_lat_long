@@ -4,13 +4,11 @@ import streamlit.components.v1 as components
 
 st.title("Get Your Current Location and Download as CSV")
 
-# Initialize session state variables
+# Initialize session state to store latitude and longitude
 if "latitude" not in st.session_state:
     st.session_state["latitude"] = None
 if "longitude" not in st.session_state:
     st.session_state["longitude"] = None
-if "location_fetched" not in st.session_state:
-    st.session_state["location_fetched"] = False
 
 # JavaScript to get geolocation **only when the button is clicked**
 location_script = """
@@ -21,9 +19,14 @@ location_script = """
                     (position) => {
                         var lat = position.coords.latitude;
                         var lon = position.coords.longitude;
-                        // Send data back to Streamlit
-                        document.getElementById("geo_data").value = lat + "," + lon;
-                        document.getElementById("geo_data").dispatchEvent(new Event("input", { bubbles: true }));
+                        var coords = lat + "," + lon;
+
+                        // Send data back to Streamlit by updating the input field
+                        var dataInput = window.parent.document.querySelector('textarea[data-testid="stTextArea"]');
+                        if (dataInput) {
+                            dataInput.value = coords;
+                            dataInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
                     },
                     (error) => {
                         alert("Location access denied or unavailable.");
@@ -36,23 +39,21 @@ location_script = """
     </script>
 """
 
-# Show button to trigger JavaScript
-st.write(location_script, unsafe_allow_html=True)
+# Display JavaScript in Streamlit
+components.html(location_script, height=0)
+
+# Button to trigger JavaScript
 if st.button("Get Current Location"):
     components.html('<script>getLocation();</script>', height=0)
 
-# Hidden text area to receive geolocation data from JavaScript
-geo_data = st.text_input("Hidden Geolocation Data", key="geo_data")
+# Hidden text area to receive geolocation data
+geo_data = st.text_area("Hidden Geolocation Data", "")
 
 # Process and store location data when received
-if geo_data and not st.session_state["location_fetched"]:
-    try:
-        lat, lon = geo_data.split(",")
-        st.session_state["latitude"] = lat
-        st.session_state["longitude"] = lon
-        st.session_state["location_fetched"] = True  # Prevent re-fetching
-    except:
-        st.error("Invalid location data received.")
+if geo_data and "," in geo_data:
+    lat, lon = geo_data.split(",")
+    st.session_state["latitude"] = lat
+    st.session_state["longitude"] = lon
 
 # Display coordinates if available
 if st.session_state["latitude"] and st.session_state["longitude"]:
