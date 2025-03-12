@@ -8,6 +8,7 @@ import uuid
 from PIL import Image
 import streamlit.components.v1 as components
 import numpy as np
+import time
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
@@ -311,69 +312,23 @@ def manual_location_entry(value):
             st.rerun()
 
 # Completely rewritten geolocation component to fix the saving issue
-def request_geolocation(value):
-    # Check if we're in manual entry mode
-    if st.session_state.manual_location_mode:
-        manual_location_entry(value)
-        return
-    
+def simple_geolocation_component(value):
     st.write(f"### Getting location for: {value}")
     
-    # Add an option to switch to manual entry
-    if st.button("Switch to Manual Coordinate Entry", key=f"manual_switch_{value}"):
-        st.session_state.manual_location_mode = True
-        st.rerun()
-    
-    # Check if we already have location data for this value
-    if value in st.session_state.location_found and st.session_state.location_found[value]:
-        location_data = st.session_state.location_found[value]
+    # Create a form for immediate submission
+    with st.form(key=f"location_form_{value}"):
+        # Add hidden fields for receiving coordinates
+        latitude_field = st.empty()
+        longitude_field = st.empty()
         
-        # Display found coordinates
-        st.markdown(f"""
-        <div class="location-found">
-            <h4>Location found!</h4>
-            <p><strong>Latitude:</strong> {location_data['lat']}</p>
-            <p><strong>Longitude:</strong> {location_data['lng']}</p>
-            <p><strong>Accuracy:</strong> {location_data.get('accuracy', 'N/A')} meters</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Add save button
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Save These Coordinates", key=f"save_found_loc_{value}"):
-                lat = location_data['lat']
-                lng = location_data['lng']
-                if save_location(value, lat, lng):
-                    st.success(f"Location saved: {lat}, {lng}")
-                    # Clean up
-                    if value in st.session_state.location_found:
-                        del st.session_state.location_found[value]
-                    st.session_state.pending_location = None
-                    st.rerun()
-        
-        with col2:
-            if st.button("Cancel", key=f"cancel_found_loc_{value}"):
-                if value in st.session_state.location_found:
-                    del st.session_state.location_found[value]
-                st.session_state.pending_location = None
-                st.rerun()
-        
-        return
-    
-    # Create a container for the geolocation component
-    geoloc_container = st.container()
-    
-    with geoloc_container:
-        # Inject JavaScript to get geolocation and store the result in session state
+        # Add JavaScript to get location and auto-submit the form
         components.html(
             f"""
             <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 10px;">
                 <div id="status">Requesting your location...</div>
                 <div id="coords" style="margin-top: 10px; display: none;">
-                    <div><strong>Latitude:</strong> <span id="lat"></span></div>
-                    <div><strong>Longitude:</strong> <span id="lng"></span></div>
-                    <div><strong>Accuracy:</strong> <span id="acc"></span> meters</div>
+                    <p><strong>Latitude:</strong> <span id="lat-display"></span></p>
+                    <p><strong>Longitude:</strong> <span id="lng-display"></span></p>
                 </div>
             </div>
 
@@ -383,20 +338,63 @@ def request_geolocation(value):
                     document.getElementById('status').innerHTML = message;
                 }}
                 
-                // Function to store location in window object for Streamlit to access
-                function storeLocation(lat, lng, accuracy) {{
-                    window.streamlitLocationData = {{
-                        lat: lat,
-                        lng: lng,
-                        accuracy: accuracy,
-                        found: true
-                    }};
+                // Function to auto-fill form and submit
+                function fillAndSubmitForm(lat, lng) {{
+                    // Find the form
+                    const forms = window.parent.document.querySelectorAll('form');
+                    const locationForm = Array.from(forms).find(form => 
+                        form.querySelector('[data-testid="stForm"]') && 
+                        form.innerHTML.includes("location_form_{value}")
+                    );
                     
-                    // Send a custom event that our form can listen for
-                    const event = new CustomEvent('locationFound', {{ 
-                        detail: {{ lat, lng, accuracy }}
-                    }});
-                    document.dispatchEvent(event);
+                    if (locationForm) {{
+                        // Find input elements - these are typically in the iframes inside the form
+                        const iframes = locationForm.querySelectorAll('iframe');
+                        
+                        // For each iframe (there should be two for lat and lng)
+                        if (iframes.length >= 2) {{
+                            // Process first iframe (latitude)
+                            const latIframe = iframes[0];
+                            if (latIframe.contentWindow) {{
+                                const latInput = latIframe.contentWindow.document.querySelector('input');
+                                if (latInput) {{
+                                    latInput.value = lat;
+                                    // Trigger change event
+                                    const event = new Event('input', {{ bubbles: true }});
+                                    latInput.dispatchEvent(event);
+                                }}
+                            }}
+                            
+                            // Process second iframe (longitude)
+                            const lngIframe = iframes[1];
+                            if (lngIframe.contentWindow) {{
+                                const lngInput = lngIframe.contentWindow.document.querySelector('input');
+                                if (lngInput) {{
+                                    lngInput.value = lng;
+                                    // Trigger change event
+                                    const event = new Event('input', {{ bubbles: true }});
+                                    lngInput.dispatchEvent(event);
+                                }}
+                            }}
+                            
+                            // Display values
+                            document.getElementById('lat-display').textContent = lat;
+                            document.getElementById('lng-display').textContent = lng;
+                            document.getElementById('coords').style.display = 'block';
+                            
+                            updateStatus("<span style='color:green;'>Location found! Submitting...</span>");
+                            
+                            // Find submit button and click it
+                            setTimeout(() => {{
+                                const submitBtn = locationForm.querySelector('button[kind="formSubmit"]');
+                                if (submitBtn) {{
+                                    submitBtn.click();
+                                }} else {{
+                                    updateStatus("<span style='color:red;'>Could not find submit button.</span>");
+                                }}
+                            }}, 500);
+                        }}
+                    }}
                 }}
                 
                 // Function to get location
@@ -409,40 +407,9 @@ def request_geolocation(value):
                             function(position) {{
                                 const lat = position.coords.latitude;
                                 const lng = position.coords.longitude;
-                                const accuracy = position.coords.accuracy;
                                 
-                                // Display values
-                                document.getElementById('lat').textContent = lat;
-                                document.getElementById('lng').textContent = lng;
-                                document.getElementById('acc').textContent = accuracy;
-                                document.getElementById('coords').style.display = 'block';
-                                
-                                // Update status
-                                updateStatus("<span style='color:green;'>Location found! Click the Save Location button below.</span>");
-                                
-                                // Store in window object
-                                storeLocation(lat, lng, accuracy);
-                                
-                                // Make the div visually distinct
-                                document.querySelector('div').classList.add('location-found');
-                                
-                                // Add a button to submit the location
-                                const submitBtn = document.createElement('button');
-                                submitBtn.innerHTML = 'Submit Location';
-                                submitBtn.style.padding = '8px 16px';
-                                submitBtn.style.backgroundColor = '#4CAF50';
-                                submitBtn.style.color = 'white';
-                                submitBtn.style.border = 'none';
-                                submitBtn.style.borderRadius = '4px';
-                                submitBtn.style.cursor = 'pointer';
-                                submitBtn.style.marginTop = '10px';
-                                
-                                submitBtn.onclick = function() {{
-                                    // Submit the form
-                                    document.getElementById('location-form').submit();
-                                }};
-                                
-                                document.querySelector('div').appendChild(submitBtn);
+                                // Auto-fill and submit
+                                fillAndSubmitForm(lat, lng);
                             }},
                             // Error callback
                             function(error) {{
@@ -474,129 +441,54 @@ def request_geolocation(value):
                     }}
                 }}
                 
-                // Start the location request
+                // Start the location request immediately
                 getLocation();
-                
-                // Add a hidden form we can submit when location is found
-                const form = document.createElement('form');
-                form.id = 'location-form';
-                form.method = 'post';
-                form.style.display = 'none';
-                
-                // Add hidden fields for lat/lng
-                const latField = document.createElement('input');
-                latField.type = 'hidden';
-                latField.name = 'lat';
-                latField.id = 'lat-field';
-                
-                const lngField = document.createElement('input');
-                lngField.type = 'hidden';
-                lngField.name = 'lng';
-                lngField.id = 'lng-field';
-                
-                const accField = document.createElement('input');
-                accField.type = 'hidden';
-                accField.name = 'accuracy';
-                accField.id = 'acc-field';
-                
-                form.appendChild(latField);
-                form.appendChild(lngField);
-                form.appendChild(accField);
-                
-                document.body.appendChild(form);
-                
-                // Add listener for location found event
-                document.addEventListener('locationFound', function(e) {{
-                    // Update form fields
-                    document.getElementById('lat-field').value = e.detail.lat;
-                    document.getElementById('lng-field').value = e.detail.lng;
-                    document.getElementById('acc-field').value = e.detail.accuracy;
-                }});
             </script>
             """,
-            height=200
+            height=150
         )
+        
+        # Hidden number inputs to receive values
+        lat = st.number_input("Latitude", value=0.0, format="%.7f", key=f"lat_{value}", label_visibility="hidden")
+        lng = st.number_input("Longitude", value=0.0, format="%.7f", key=f"lng_{value}", label_visibility="hidden")
+        
+        # Submit button (will be clicked by JavaScript)
+        submit_button = st.form_submit_button("Save Location")
+        
+        # If form is submitted
+        if submit_button or (lat != 0.0 and lng != 0.0):
+            # Save the location
+            if lat != 0.0 and lng != 0.0:
+                if save_location(value, lat, lng):
+                    st.success(f"Location saved: {lat}, {lng}")
+                    st.session_state.pending_location = None
+                    time.sleep(1)  # Short delay for user to see success message
+                    st.rerun()
+                else:
+                    st.error("Failed to save location.")
     
-    # Add buttons for saving/pulling the location data
-    col1, col2 = st.columns(2)
+    # Manual entry option
+    st.write("### Or enter coordinates manually:")
     
-    with col1:
-        if st.button("Get Location Data", key=f"get_loc_data_{value}"):
-            # Create a small JavaScript snippet to extract data from the window object
-            components.html(
-                """
-                <script>
-                    if (window.streamlitLocationData && window.streamlitLocationData.found) {
-                        // Function to send data to Streamlit
-                        function sendToStreamlit() {
-                            const data = window.streamlitLocationData;
-                            
-                            // Create form data
-                            const formData = new FormData();
-                            formData.append('lat', data.lat);
-                            formData.append('lng', data.lng);
-                            formData.append('accuracy', data.accuracy);
-                            
-                            // Send the data via fetch
-                            fetch(window.location.href, {
-                                method: 'POST',
-                                body: formData
-                            });
-                            
-                            // Also update URL params to force a reload
-                            const url = new URL(window.location.href);
-                            url.searchParams.set('_loc_found', 'true');
-                            url.searchParams.set('_t', Date.now());
-                            window.location.href = url.toString();
-                        }
-                        
-                        // Call the function
-                        sendToStreamlit();
-                    } else {
-                        alert("No location data available yet. Please wait for location to be found.");
-                    }
-                </script>
-                """,
-                height=0
-            )
-            
-            # Store the location in session state when the JavaScript sends it
-            if 'streamlitLocationData' in st.session_state and st.session_state.streamlitLocationData.get('found'):
-                loc_data = st.session_state.streamlitLocationData
-                st.session_state.location_found[value] = {
-                    'lat': loc_data['lat'],
-                    'lng': loc_data['lng'],
-                    'accuracy': loc_data.get('accuracy')
-                }
-                st.rerun()
-    
-    with col2:
-        if st.button("Cancel", key=f"cancel_geo_{value}"):
-            st.session_state.pending_location = None
-            if value in st.session_state.location_found:
-                del st.session_state.location_found[value]
-            st.rerun()
-    
-    # Add direct coordinate input for immediate action
-    st.write("### Enter coordinates directly:")
-    
-    loc_form = st.form(key=f"direct_loc_form_{value}")
-    with loc_form:
+    with st.form(key=f"manual_location_form_{value}"):
         col1, col2 = st.columns(2)
         with col1:
-            direct_lat = st.number_input("Latitude", format="%.7f", key=f"direct_lat_{value}")
+            manual_lat = st.number_input("Latitude", value=0.0, format="%.7f", step=0.0000001, key=f"manual_lat_{value}")
         with col2:
-            direct_lng = st.number_input("Longitude", format="%.7f", key=f"direct_lng_{value}")
+            manual_lng = st.number_input("Longitude", value=0.0, format="%.7f", step=0.0000001, key=f"manual_lng_{value}")
         
         # Submit button
-        submitted = st.form_submit_button("Save These Coordinates")
-        if submitted:
-            if save_location(value, direct_lat, direct_lng):
-                st.success(f"Location saved: {direct_lat}, {direct_lng}")
+        manual_submit = st.form_submit_button("Save Manual Coordinates")
+        if manual_submit:
+            if save_location(value, manual_lat, manual_lng):
+                st.success(f"Location saved: {manual_lat}, {manual_lng}")
                 st.session_state.pending_location = None
-                if value in st.session_state.location_found:
-                    del st.session_state.location_found[value]
                 st.rerun()
+    
+    # Cancel button
+    if st.button("Cancel", key=f"cancel_geo_{value}"):
+        st.session_state.pending_location = None
+        st.rerun()
 
 # Sidebar camera implementation
 def show_camera_sidebar(value):
@@ -698,7 +590,7 @@ def main():
             # Check if location is being requested
             if st.session_state.pending_location:
                 value = st.session_state.pending_location.get('value')
-                request_geolocation(value)
+                simple_geolocation(value)
             else:
                 st.write("## Values to enrich")
                 
