@@ -11,7 +11,7 @@ from streamlit_back_camera_input import back_camera_input
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling
+# Add custom component fixes based on deeper understanding of the API
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -68,7 +68,28 @@ st.markdown("""
         margin: 10px auto;
         width: fit-content;
     }
+    
+    /* Give more room for the camera component */
+    [data-testid="stVerticalBlock"] iframe {
+        min-height: 360px !important;
+    }
 </style>
+
+<script>
+// Custom script to ensure camera component frame is visible
+document.addEventListener('DOMContentLoaded', function() {
+    // Set interval to periodically check for iframes and ensure they have enough height
+    setInterval(function() {
+        const iframes = document.querySelectorAll('iframe');
+        iframes.forEach(function(iframe) {
+            if (iframe.height < 300) {
+                iframe.height = 360;
+                iframe.style.minHeight = '360px';
+            }
+        });
+    }, 1000);
+});
+</script>
 """, unsafe_allow_html=True)
 
 # Session state initialization
@@ -289,18 +310,23 @@ def main():
                 value = st.session_state.active_capture_value
                 st.subheader(f"Taking Photo for: {value}")
                 
-                # Simple instructions
-                st.info("Position your item and then tap directly on the camera view to capture.")
+                # Simple instructions before camera
+                st.info("Position your item and tap directly on the camera view to capture")
                 
-                # Add a visual hint
+                # Add some space around the camera component
+                st.markdown('<div style="padding:10px 0;"></div>', unsafe_allow_html=True)
+                
+                # Use custom component directly with minimal parameters
+                photo = back_camera_input("", key=f"cam_{value}")
+                
+                # Add tap to capture text
                 st.markdown('<div class="camera-prompt">👆 Tap on the camera to capture</div>', unsafe_allow_html=True)
                 
-                # Use back camera component with specific dimensions
-                # Pass height=400 and width=800 parameters to control the camera size
-                photo = back_camera_input("", key=f"cam_{value}", height=400, width=800)
+                # Space before cancel button
+                st.write("")
                 
                 # Cancel button
-                if st.button("Cancel Photo Capture", key=f"cam_cancel_{value}"):
+                if st.button("❌ Cancel Photo Capture", key=f"cam_cancel_{value}"):
                     st.session_state.active_capture_value = None
                     st.rerun()
                 
@@ -319,7 +345,7 @@ def main():
                             st.image(img, width=300)
                             
                             # Continue button
-                            if st.button("Continue", key="continue_after_capture"):
+                            if st.button("✅ Continue", key="continue_after_capture"):
                                 st.session_state.active_capture_value = None
                                 st.rerun()
                         else:
