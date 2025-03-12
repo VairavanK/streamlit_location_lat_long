@@ -6,12 +6,12 @@ from io import BytesIO
 import uuid
 from PIL import Image
 from streamlit_js_eval import get_geolocation
-from streamlit_back_camera_input import back_camera_input  # Import the back camera component
+from streamlit_back_camera_input import back_camera_input
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling with minimal camera CSS
+# Add mobile-friendly styling with fixes based on component code
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -55,6 +55,29 @@ st.markdown("""
     /* Standard button styling */
     .stButton > button {
         font-weight: bold;
+    }
+    
+    /* Camera-related CSS fixes based on component code */
+    .stCamera video {
+        width: 100% !important; 
+        height: auto !important;
+        max-height: 400px !important;
+        object-fit: cover !important;
+        cursor: pointer !important;
+        border: 2px solid #e0e0e0 !important;
+        border-radius: 8px !important;
+    }
+    
+    /* Make sure capture button is visible */
+    .camera-prompt {
+        background-color: rgba(0,0,0,0.7);
+        color: white;
+        text-align: center;
+        padding: 8px 16px;
+        font-size: 16px;
+        border-radius: 20px;
+        margin: 10px auto;
+        width: fit-content;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -278,10 +301,13 @@ def main():
                 st.subheader(f"Taking Photo for: {value}")
                 
                 # Simple instructions
-                st.info("Please position the item in view and tap on the video area to take a photo. You might need to tap twice.")
+                st.info("Position your item and then tap directly on the camera view to capture.")
                 
-                # Use back camera component
-                photo = back_camera_input()
+                # Add a visual hint below the camera - this will be positioned with CSS
+                st.markdown('<div class="camera-prompt">👆 Tap anywhere on camera to capture</div>', unsafe_allow_html=True)
+                
+                # Use back camera component with empty label
+                photo = back_camera_input("", key=f"cam_{value}")
                 
                 # Cancel button
                 if st.button("Cancel Photo Capture", key=f"cam_cancel_{value}"):
