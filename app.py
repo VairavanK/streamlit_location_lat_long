@@ -190,7 +190,41 @@ def save_session_data():
     if st.session_state.data is not None:
         session_file = os.path.join(UPLOAD_FOLDER, f"session_{st.session_state.session_id}.csv")
         st.session_state.data.to_csv(session_file, index=False)
-
+def get_and_save_location(value):
+    # One button to get location and immediately save it
+    if st.button(f"📍 Get Location for {value}", key=f"loc_{value}"):
+        with st.spinner("Getting your location..."):
+            # Get location data
+            location_data = get_geolocation()
+            
+            # Check if we got data
+            if location_data and 'coords' in location_data:
+                lat = location_data['coords']['latitude']
+                lng = location_data['coords']['longitude']
+                
+                # Save it to the dataframe
+                if save_location(value, lat, lng):
+                    st.success(f"Location saved: {lat:.6f}, {lng:.6f}")
+                    return True
+                else:
+                    st.error("Could not save location data")
+            else:
+                st.error("Could not get location. Please allow location access.")
+        
+        # Add a small manual entry option right below if location fails
+        st.write("If location detection fails, enter coordinates manually:")
+        col1, col2 = st.columns(2)
+        with col1:
+            lat = st.number_input("Latitude", key=f"manual_lat_{value}")
+        with col2:
+            lng = st.number_input("Longitude", key=f"manual_lng_{value}")
+        
+        if st.button("Save Manual Coordinates", key=f"save_manual_{value}"):
+            if save_location(value, lat, lng):
+                st.success(f"Manual location saved: {lat}, {lng}")
+                return True
+    
+    return False
 # Function to load session data from disk
 def load_session_data():
     session_file = os.path.join(UPLOAD_FOLDER, f"session_{st.session_state.session_id}.csv")
@@ -460,9 +494,8 @@ def main():
                                     
                                     # Only show location button if location not captured yet
                                     if not st.session_state.progress.get(value, {}).get('location', False):
-                                        if st.button(f"📍 Get Location for {value}", key=f"loc_{value}"):
-                                            st.session_state.pending_location = {'value': value, 'status': 'pending'}
-                                            st.rerun()
+                                        if get_and_save_location(value):
+                                        st.rerun()
                                 
                                 with col2:
                                     img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
