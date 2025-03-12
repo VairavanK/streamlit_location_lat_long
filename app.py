@@ -445,7 +445,7 @@ def request_geolocation(value):
             )
             
             # Check URL parameters
-            params = st.query_params()
+            params = st.experimental_get_query_params()
             if 'save_location' in params and params.get('save_location', [''])[0] == 'true':
                 try:
                     lat = float(params.get('lat', ['0'])[0])
@@ -505,7 +505,7 @@ def show_camera_sidebar(value):
 # Check URL parameters for location data
 def check_location_params():
     # Get URL parameters
-    params = st.query_params()
+    params = st.experimental_get_query_params()
     
     # Check if location was found and should be saved
     if 'save_location' in params and params.get('save_location', [''])[0] == 'true':
