@@ -4,13 +4,13 @@ import streamlit.components.v1 as components
 
 st.title("Get Your Current Location and Download as CSV")
 
-# Initialize session state for latitude and longitude
+# Initialize session state variables to prevent reruns
 if "latitude" not in st.session_state:
     st.session_state["latitude"] = None
 if "longitude" not in st.session_state:
     st.session_state["longitude"] = None
 
-# JavaScript to get location and update Streamlit's text area
+# JavaScript to get user's geolocation and send it to Streamlit
 location_script = """
     <script>
         function getLocation() {
@@ -19,10 +19,12 @@ location_script = """
                     (position) => {
                         var lat = position.coords.latitude;
                         var lon = position.coords.longitude;
-                        var coords = lat + "," + lon;
-                        // Update hidden text area
-                        document.getElementById("geo_data").value = coords;
-                        document.getElementById("geo_data").dispatchEvent(new Event("input", { bubbles: true }));
+                        
+                        // Send the data back to Streamlit via an iframe
+                        var iframe = document.createElement("iframe");
+                        iframe.style.display = "none";
+                        iframe.src = "https://yourserver.com?location=" + encodeURIComponent(lat + ',' + lon);
+                        document.body.appendChild(iframe);
                     },
                     (error) => {
                         alert("Location access denied or unavailable.");
@@ -36,14 +38,14 @@ location_script = """
     <button onclick="getLocation()">Get Current Location</button>
 """
 
-# Embed JavaScript inside Streamlit
+# Render JavaScript inside Streamlit
 components.html(location_script, height=100)
 
-# Hidden text area to capture JavaScript output
-geo_data = st.text_area("Hidden Geolocation Data", key="geo_data")
+# Input field to receive location data (works as a bridge between JavaScript & Streamlit)
+geo_data = st.text_input("Location Data", "")
 
-# Process and store location data
-if geo_data:
+# Process and store location data in session state
+if geo_data and "," in geo_data:
     try:
         lat, lon = geo_data.split(",")
         st.session_state["latitude"] = lat
@@ -51,10 +53,10 @@ if geo_data:
     except:
         st.error("Invalid location data received.")
 
-# Display coordinates if available
+# Display the retrieved coordinates
 if st.session_state["latitude"] and st.session_state["longitude"]:
-    st.success(f"**Latitude:** {st.session_state['latitude']}")
-    st.success(f"**Longitude:** {st.session_state['longitude']}")
+    st.success(f"Latitude: {st.session_state['latitude']}")
+    st.success(f"Longitude: {st.session_state['longitude']}")
 
     # Create DataFrame and convert to CSV
     df = pd.DataFrame({"Latitude": [st.session_state["latitude"]], "Longitude": [st.session_state["longitude"]]})
