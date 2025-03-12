@@ -11,7 +11,7 @@ from streamlit_back_camera_input import back_camera_input  # Import the back cam
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling
+# Add mobile-friendly styling with improved camera interface
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -57,22 +57,54 @@ st.markdown("""
         font-weight: bold;
     }
     
-    /* Make camera smaller */
-    .stCamera > div {
-        max-height: 400px !important;
+    /* Fix for camera container - make it taller */
+    .stCamera {
+        min-height: 500px !important;
     }
     
-    /* Fix for back camera aspect ratio */
+    /* Fix for camera aspect ratio and size */
+    .stCamera > div {
+        min-height: 400px !important;
+    }
+    
+    /* Make the video element larger and fix aspect ratio */
     .stCamera video {
-        aspect-ratio: 3/4 !important;
-        max-height: 400px !important;
+        aspect-ratio: 4/3 !important;
+        min-height: 400px !important;
+        width: 100% !important;
         object-fit: cover !important;
     }
     
-    /* Camera container modifications */
-    .camera-container {
-        max-width: 500px !important;
+    /* Make the capture button more visible */
+    .stCamera button {
+        background-color: #f44336 !important;
+        border-radius: 50% !important;
+        width: 60px !important;
+        height: 60px !important;
+        position: relative;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1000;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3) !important;
+    }
+    
+    /* Add visual indicators */
+    .stCamera::after {
+        content: "👆 Tap to capture";
+        display: block;
+        text-align: center;
+        font-size: 16px;
+        font-weight: bold;
+        color: white;
+        background-color: rgba(0,0,0,0.6);
+        padding: 10px;
+        position: relative;
+        bottom: 150px;
         margin: 0 auto;
+        width: 150px;
+        border-radius: 20px;
+        z-index: 999;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -295,17 +327,16 @@ def main():
                 value = st.session_state.active_capture_value
                 st.subheader(f"Taking Photo for: {value}")
                 
-                # Add container with aspect ratio control
-                with st.container():
-                    st.markdown('<div class="camera-container">', unsafe_allow_html=True)
-                    
-                    # Use back camera component with custom parameters
-                    photo = back_camera_input("Camera", key=f"cam_{value}")
-                    
-                    st.markdown('</div>', unsafe_allow_html=True)
+                st.info("Please position the item in view and tap to take a photo")
                 
-                # Cancel button
-                if st.button("Cancel", key=f"cam_cancel_{value}"):
+                # Clear space around camera to make it more prominent
+                st.write("")
+                
+                # Use back camera component
+                photo = back_camera_input("", key=f"cam_{value}")
+                
+                # Large cancel button below camera
+                if st.button("✖️ CANCEL", key=f"cam_cancel_{value}", help="Cancel and go back"):
                     st.session_state.active_capture_value = None
                     st.rerun()
                 
@@ -316,10 +347,19 @@ def main():
                         image_data = photo.getvalue()
                         # Process and save the image
                         if save_image(value, image_data):
-                            st.success("Photo saved successfully!")
-                            # Turn off camera
-                            st.session_state.active_capture_value = None
-                            st.rerun()
+                            st.success("✅ Photo saved successfully!")
+                            
+                            # Show the image that was captured
+                            st.write("Preview of captured image:")
+                            img = Image.open(BytesIO(image_data))
+                            st.image(img, width=300)
+                            
+                            # Continue button instead of automatic return
+                            if st.button("✅ Continue", key="continue_after_capture"):
+                                st.session_state.active_capture_value = None
+                                st.rerun()
+                        else:
+                            st.error("Failed to save photo. Please try again.")
                     except Exception as e:
                         st.error(f"Error saving photo: {e}")
                         st.error("Please try taking another photo or cancel and try again.")
