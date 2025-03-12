@@ -10,7 +10,7 @@ if "latitude" not in st.session_state:
 if "longitude" not in st.session_state:
     st.session_state["longitude"] = None
 
-# JavaScript to get user's geolocation and send it to Streamlit
+# JavaScript to get user's geolocation and pass it to Streamlit
 location_script = """
     <script>
         function getLocation() {
@@ -20,19 +20,12 @@ location_script = """
                         var lat = position.coords.latitude;
                         var lon = position.coords.longitude;
 
-                        // Send data back to Streamlit using a temporary input element
-                        var streamlit_input = document.createElement("input");
-                        streamlit_input.type = "hidden";
-                        streamlit_input.name = "geo_data";
-                        streamlit_input.value = lat + "," + lon;
-                        document.body.appendChild(streamlit_input);
-
-                        // Simulate form submission to trigger Streamlit update
-                        var form = document.createElement("form");
-                        form.method = "POST";
-                        form.appendChild(streamlit_input);
-                        document.body.appendChild(form);
-                        form.submit();
+                        // Send the data back to Streamlit using an iframe trick
+                        var streamlit_data = lat + "," + lon;
+                        var iframe = document.createElement("iframe");
+                        iframe.src = "https://localhost/?data=" + encodeURIComponent(streamlit_data);
+                        iframe.style.display = "none";
+                        document.body.appendChild(iframe);
                     },
                     (error) => {
                         alert("Location access denied or unavailable.");
@@ -46,26 +39,27 @@ location_script = """
     <button onclick="getLocation()">Get Current Location</button>
 """
 
-# Embed JavaScript in Streamlit
+# Render JavaScript inside Streamlit
 components.html(location_script, height=100)
 
-# Capture user input sent from JavaScript
-geo_data = st.text_input("Hidden Geo Data", key="geo_data")
+# Input field to receive location data from the frontend
+location_input = st.text_input("Location Data (Hidden)", "")
 
-if geo_data:
+# Process and store location data
+if location_input:
     try:
-        lat, lon = geo_data.split(",")
+        lat, lon = location_input.split(",")
         st.session_state["latitude"] = lat
         st.session_state["longitude"] = lon
     except:
         st.error("Invalid location data received.")
 
-# Display latitude and longitude
+# Display location if available
 if st.session_state["latitude"] and st.session_state["longitude"]:
     st.write(f"**Latitude:** {st.session_state['latitude']}")
     st.write(f"**Longitude:** {st.session_state['longitude']}")
 
-    # Create DataFrame for CSV export
+    # Create DataFrame for CSV
     df = pd.DataFrame({"Latitude": [st.session_state["latitude"]], "Longitude": [st.session_state["longitude"]]})
     csv_data = df.to_csv(index=False).encode("utf-8")
 
