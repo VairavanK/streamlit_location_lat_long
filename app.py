@@ -272,16 +272,19 @@ def filter_values(values, search_term):
             filtered.append(v)
     return filtered
 
-# FIXED: Simplified geolocation function
-def get_and_save_location(value):
-    # If we haven't already requested location for this value
-    if value not in st.session_state.location_requested:
-        st.session_state.location_requested[value] = False
+# FIXED: Simplified geolocation function with prefix for unique keys
+def get_and_save_location(value, prefix=""):
+    # Make a unique location request key for this value and prefix
+    loc_request_key = f"{prefix}_{value}"
+    
+    # If we haven't already requested location for this key
+    if loc_request_key not in st.session_state.location_requested:
+        st.session_state.location_requested[loc_request_key] = False
     
     # Button to get location OR continue if already requested
-    if st.button(f"📍 Get Location for {value}", key=f"getloc_{value}") or st.session_state.location_requested[value]:
+    if st.button(f"📍 Get Location for {value}", key=f"{prefix}_getloc_{value}") or st.session_state.location_requested[loc_request_key]:
         # Set flag that we've requested location
-        st.session_state.location_requested[value] = True
+        st.session_state.location_requested[loc_request_key] = True
         
         try:
             with st.spinner("Getting your location..."):
@@ -307,11 +310,11 @@ def get_and_save_location(value):
                     # Add manual refresh and cancel options
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("I've granted permission - refresh", key=f"refresh_{value}"):
+                        if st.button("I've granted permission - refresh", key=f"{prefix}_refresh_{value}"):
                             st.rerun()
                     with col2:
-                        if st.button("Cancel", key=f"cancel_loc_{value}"):
-                            st.session_state.location_requested[value] = False
+                        if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
+                            st.session_state.location_requested[loc_request_key] = False
                             st.rerun()
                 elif isinstance(location_data, dict) and 'coords' in location_data:
                     # We have the location data!
@@ -323,7 +326,7 @@ def get_and_save_location(value):
                     if save_location(value, latitude, longitude):
                         st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
                         # Reset flag
-                        st.session_state.location_requested[value] = False
+                        st.session_state.location_requested[loc_request_key] = False
                         return True
                     else:
                         st.error("Failed to save location data")
@@ -336,20 +339,20 @@ def get_and_save_location(value):
         st.write("Enter coordinates manually:")
         col1, col2 = st.columns(2)
         with col1:
-            man_lat = st.number_input("Latitude", value=0.0, format="%.7f", key=f"manlat_{value}")
+            man_lat = st.number_input("Latitude", value=0.0, format="%.7f", key=f"{prefix}_manlat_{value}", label_visibility="visible")
         with col2:
-            man_lng = st.number_input("Longitude", value=0.0, format="%.7f", key=f"manlng_{value}")
+            man_lng = st.number_input("Longitude", value=0.0, format="%.7f", key=f"{prefix}_manlng_{value}", label_visibility="visible")
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Save Manual Coordinates", key=f"saveman_{value}"):
+            if st.button("Save Manual Coordinates", key=f"{prefix}_saveman_{value}"):
                 if save_location(value, man_lat, man_lng):
                     st.success(f"Manual location saved: {man_lat}, {man_lng}")
-                    st.session_state.location_requested[value] = False
+                    st.session_state.location_requested[loc_request_key] = False
                     return True
         with col2:
-            if st.button("Cancel Location", key=f"cancelall_{value}"):
-                st.session_state.location_requested[value] = False
+            if st.button("Cancel Location", key=f"{prefix}_cancelall_{value}"):
+                st.session_state.location_requested[loc_request_key] = False
                 st.rerun()
     
     return False
@@ -361,7 +364,7 @@ def show_camera_sidebar(value):
         st.title(f"Take Photo for {value}")
         
         # Add camera input in the sidebar
-        photo = st.camera_input("", key=f"sidebar_cam_{value}")
+        photo = st.camera_input("Camera", key=f"sidebar_cam_{value}")
         
         # Cancel button
         if st.button("Cancel", key=f"sidebar_cancel_{value}"):
@@ -488,9 +491,9 @@ def main():
                                 loc_status = "✅" if st.session_state.progress.get(value, {}).get('location', False) else "❌"
                                 st.write(f"Location: {loc_status}")
                                 
-                                # Only show location button if location not captured yet
+                                # Only show location button if location not captured yet - with prefix for unique keys
                                 if not st.session_state.progress.get(value, {}).get('location', False):
-                                    if get_and_save_location(value):
+                                    if get_and_save_location(value, prefix="ip"):
                                         st.rerun()
                             
                             with col2:
@@ -499,7 +502,7 @@ def main():
                                 
                                 # Only show camera button if image not captured yet
                                 if not st.session_state.progress.get(value, {}).get('image', False):
-                                    if st.button(f"📸 Take Photo for {value}", key=f"activate_{value}"):
+                                    if st.button(f"📸 Take Photo for {value}", key=f"ip_activate_{value}"):
                                         st.session_state.camera_sidebar_active = True
                                         st.session_state.camera_value = value
                                         st.rerun()
@@ -554,7 +557,8 @@ def main():
                                 st.write(f"Location: {loc_status}")
                                 
                                 if not location_done:
-                                    if get_and_save_location(value):
+                                    # Use a different prefix for all_tab to create unique keys
+                                    if get_and_save_location(value, prefix="all"):
                                         st.rerun()
                                 else:
                                     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
