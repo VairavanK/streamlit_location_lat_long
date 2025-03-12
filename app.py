@@ -281,7 +281,7 @@ def main():
                 st.info("Please position the item in view and tap on the video area to take a photo. You might need to tap twice.")
                 
                 # Use back camera component
-                photo = back_camera_input("", key=f"cam_{value}")
+                photo = back_camera_input()
                 
                 # Cancel button
                 if st.button("Cancel Photo Capture", key=f"cam_cancel_{value}"):
