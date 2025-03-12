@@ -352,7 +352,6 @@ def request_geolocation(value):
         </script>
         """,
         height=120,
-        key=geo_key
     )
     
     # Add a cancel button
