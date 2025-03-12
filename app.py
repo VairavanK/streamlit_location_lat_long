@@ -4,7 +4,6 @@ import base64
 from datetime import datetime
 from io import BytesIO
 import uuid
-import time
 from PIL import Image
 from streamlit_js_eval import get_geolocation
 from streamlit_back_camera_input import back_camera_input
@@ -82,26 +81,6 @@ st.markdown("""
         padding: 5px;
         background-color: #f8f9fa;
     }
-    
-    /* Location completion indicator */
-    .location-complete {
-        padding: 8px 12px;
-        background-color: #e8f5e9;
-        border-radius: 4px;
-        margin: 5px 0;
-        border-left: 4px solid #4caf50;
-        font-weight: 500;
-    }
-    
-    /* Location pending indicator */
-    .location-pending {
-        padding: 8px 12px;
-        background-color: #fff8e1;
-        border-radius: 4px;
-        margin: 5px 0;
-        border-left: 4px solid #ffc107;
-        font-weight: 500;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -126,8 +105,6 @@ if 'location_requested' not in st.session_state:
     st.session_state.location_requested = {}
 if 'temp_photo' not in st.session_state:
     st.session_state.temp_photo = None
-if 'location_complete_time' not in st.session_state:
-    st.session_state.location_complete_time = 0
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -178,8 +155,6 @@ def save_location(value, lat, lng):
     if not row_idx.empty:
         st.session_state.data.loc[row_idx, st.session_state.location_column] = f"{lat}, {lng}"
         st.session_state.progress[value]['location'] = True
-        # Record the time when location is completed
-        st.session_state.location_complete_time = time.time()
         return True
     return False
 
@@ -222,12 +197,6 @@ def filter_values(values, search_term):
     search_term = str(search_term).lower()
     return [v for v in values if search_term in str(v).lower()]
 
-# Check if enough time has passed since last location
-def is_location_ready():
-    current_time = time.time()
-    # Wait at least 2 seconds after last successful location capture
-    return (current_time - st.session_state.location_complete_time) >= 2
-
 # Get and save location with optimized performance
 def get_and_save_location(value, prefix=""):
     # Make a unique location request key for this value and prefix
@@ -237,31 +206,8 @@ def get_and_save_location(value, prefix=""):
     if loc_request_key not in st.session_state.location_requested:
         st.session_state.location_requested[loc_request_key] = False
     
-    # Check if we need to wait before requesting location
-    location_wait_needed = not is_location_ready()
-    
-    # Show waiting message if needed
-    if location_wait_needed:
-        st.markdown(
-            '<div class="location-pending">📡 Please wait a moment before requesting another location...</div>', 
-            unsafe_allow_html=True
-        )
-        # Calculate remaining wait time
-        current_time = time.time()
-        elapsed = current_time - st.session_state.location_complete_time
-        if elapsed < 2:
-            time_left = max(0, 2 - elapsed)
-            # Create a simple progress indicator
-            progress = st.progress(int(elapsed / 2 * 100))
-            # Update progress every 0.1 seconds
-            for i in range(int(elapsed * 10), 20):
-                time.sleep(0.1)
-                progress.progress(i * 5)
-            progress.empty()
-    
     # Button to get location OR continue if already requested
-    button_disabled = location_wait_needed
-    if (not button_disabled and st.button(f"📍 Get Location", key=f"{prefix}_getloc_{value}")) or st.session_state.location_requested[loc_request_key]:
+    if st.button(f"📍 Get Location", key=f"{prefix}_getloc_{value}") or st.session_state.location_requested[loc_request_key]:
         # Set flag that we've requested location
         st.session_state.location_requested[loc_request_key] = True
         
@@ -310,11 +256,6 @@ def get_and_save_location(value, prefix=""):
                     # Save to dataframe
                     if save_location(value, latitude, longitude):
                         st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
-                        # Add a visual indicator of completion
-                        st.markdown(
-                            '<div class="location-complete">✅ Location saved successfully! You can now request another location.</div>', 
-                            unsafe_allow_html=True
-                        )
                         # Reset flag
                         st.session_state.location_requested[loc_request_key] = False
                         return True
@@ -477,9 +418,6 @@ def main():
             
             # Convert to strings to avoid numpy array issues
             unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique().tolist()
-            
-            # Location guidance for users
-            st.info("📍 **Location Tip**: For best performance, wait for each location request to fully complete before starting another one.")
             
             # Search and filter functionality
             search_term = st.text_input("🔍 Search values:", value=st.session_state.search_term)
