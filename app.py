@@ -8,6 +8,10 @@ import uuid
 from PIL import Image
 import streamlit.components.v1 as components
 
+# Set page config
+st.set_page_config(page_title="Data Enrichment App", layout="wide")
+
+# Add mobile-friendly styling
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -34,6 +38,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
 # Custom component to use back camera
 def camera_input_with_back_camera(label, key=None):
     # Generate a unique key if not provided
@@ -136,11 +141,12 @@ def camera_input_with_back_camera(label, key=None):
             
     return None
 
+# Create directories for storing data if they don't exist
 # Ensure data directories exist in writable locations
-UPLOAD_FOLDER = "uploaded_files"
-IMAGE_FOLDER = "captured_images"
-
 try:
+    UPLOAD_FOLDER = "uploaded_files"
+    IMAGE_FOLDER = "captured_images"
+    
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
     if not os.path.exists(IMAGE_FOLDER):
@@ -155,18 +161,6 @@ except PermissionError:
         os.makedirs(UPLOAD_FOLDER)
     if not os.path.exists(IMAGE_FOLDER):
         os.makedirs(IMAGE_FOLDER)
-
-# Set page config
-st.set_page_config(page_title="Data Enrichment App", layout="wide")
-
-# Create directories for storing data if they don't exist
-UPLOAD_FOLDER = "uploaded_files"
-IMAGE_FOLDER = "captured_images"
-
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-if not os.path.exists(IMAGE_FOLDER):
-    os.makedirs(IMAGE_FOLDER)
 
 # Session state initialization
 if 'data' not in st.session_state:
@@ -351,8 +345,8 @@ if st.session_state.data is not None:
                             
                             # Only show camera button if image not captured yet
                             if not st.session_state.progress.get(value, {}).get('image', False):
-                                # Capture image using webcam
-                                img_file = camera_input_with_back_camera(f"Take a picture for {value}", key=f"cam_{value}")
+                                # Use our custom back camera function instead
+                                img_file = camera_input_with_back_camera(f"Take picture for {value}", key=f"cam_{value}")
                                 if img_file is not None:
                                     save_image(value, img_file.getvalue())
             else:
@@ -418,7 +412,8 @@ if st.session_state.data is not None:
                         st.write(f"Image: {img_status}")
                         
                         if not image_done:
-                            img_file = camera_input_with_back_camera(f"Take a picture for {value}", key=f"all_cam_{value}")
+                            # Use our custom back camera function
+                            img_file = camera_input_with_back_camera(f"Take picture for {value}", key=f"all_cam_{value}")
                             if img_file is not None:
                                 save_image(value, img_file.getvalue())
                         else:
