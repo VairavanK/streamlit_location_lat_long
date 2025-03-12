@@ -3,6 +3,7 @@ import pandas as pd
 import base64
 from datetime import datetime
 from io import BytesIO
+import uuid
 from PIL import Image
 from streamlit_js_eval import get_geolocation
 
@@ -21,19 +22,22 @@ st.markdown("""
             margin-bottom: 10px;
         }
         
+        /* Make the app full width on mobile */
         .main .block-container {
             padding-left: 5px;
             padding-right: 5px;
             max-width: 100%;
         }
         
+        /* Make expanders more touch-friendly */
         .streamlit-expanderHeader {
             font-size: 1.2rem;
             padding: 12px 0;
         }
     }
     
-    .download-button {
+    /* Enhanced camera button */
+    .big-camera-button {
         display: block;
         width: 100%;
         padding: 15px;
@@ -46,36 +50,63 @@ st.markdown("""
         cursor: pointer;
         text-decoration: none;
     }
+
+    /* Standard button styling */
+    .stButton > button {
+        font-weight: bold;
+    }
+    
+    /* Make camera smaller */
+    .stCamera > div {
+        max-height: 400px !important;
+    }
+    
+    /* Camera container modifications */
+    .camera-container {
+        max-width: 500px !important;
+        margin: 0 auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Simplified session state initialization
+# Session state initialization
 if 'data' not in st.session_state:
     st.session_state.data = None
 if 'selected_column' not in st.session_state:
     st.session_state.selected_column = None
 if 'progress' not in st.session_state:
     st.session_state.progress = {}
-if 'search_term' not in st.session_state:
-    st.session_state.search_term = ""
 if 'location_column' not in st.session_state:
     st.session_state.location_column = None
 if 'image_column' not in st.session_state:
     st.session_state.image_column = None
-if 'active_camera' not in st.session_state:
-    st.session_state.active_camera = None
+if 'camera_active' not in st.session_state:
+    st.session_state.camera_active = {}
+if 'search_term' not in st.session_state:
+    st.session_state.search_term = ""
+if 'camera_sidebar_active' not in st.session_state:
+    st.session_state.camera_sidebar_active = False
+if 'camera_value' not in st.session_state:
+    st.session_state.camera_value = None
 if 'location_requested' not in st.session_state:
     st.session_state.location_requested = {}
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
     try:
+        # Open the image
         img = Image.open(BytesIO(image_data))
+        
+        # Resize if larger than max_size
         if img.width > max_size[0] or img.height > max_size[1]:
             img.thumbnail(max_size, Image.LANCZOS)
+        
+        # Save to BytesIO with compression
         output = BytesIO()
         img.save(output, format='JPEG', quality=quality)
         output.seek(0)
+        
+        # Encode to base64
         encoded = base64.b64encode(output.getvalue()).decode('utf-8')
         return f"data:image/jpeg;base64,{encoded}"
     except Exception as e:
@@ -88,8 +119,52 @@ def get_csv_download_link(df):
     b64 = base64.b64encode(csv.encode()).decode()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"enriched_data_{timestamp}.csv"
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="download-button">Download Enriched CSV</a>'
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="big-camera-button">Download Enriched CSV</a>'
     return href
+
+# Save location data
+def save_location(value, lat, lng):
+    if st.session_state.location_column is None:
+        st.session_state.location_column = f"{st.session_state.selected_column}_location"
+        if st.session_state.location_column not in st.session_state.data.columns:
+            st.session_state.data[st.session_state.location_column] = None
+    
+    # Find the row index for the value
+    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == str(value)].index
+    if not row_idx.empty:
+        st.session_state.data.loc[row_idx, st.session_state.location_column] = f"{lat}, {lng}"
+        st.session_state.progress[value]['location'] = True
+        return True
+    return False
+
+# Save image data as base64 encoded string
+def save_image(value, image_data):
+    if st.session_state.image_column is None:
+        st.session_state.image_column = f"{st.session_state.selected_column}_image"
+        if st.session_state.image_column not in st.session_state.data.columns:
+            st.session_state.data[st.session_state.image_column] = None
+    
+    try:
+        # Compress and encode the image
+        base64_image = compress_and_encode_image(image_data)
+        
+        if base64_image:
+            # Find the row index for the value
+            row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == str(value)].index
+            if not row_idx.empty:
+                # Store base64 image directly in the dataframe
+                st.session_state.data.loc[row_idx, st.session_state.image_column] = base64_image
+                st.session_state.progress[value]['image'] = True
+                # Turn off camera after capture
+                st.session_state.camera_active[value] = False
+                st.session_state.camera_sidebar_active = False
+                st.session_state.camera_value = None
+                return True
+        else:
+            st.error("Failed to process image")
+    except Exception as e:
+        st.error(f"Error saving image: {e}")
+    return False
 
 # Display image from base64
 def display_image_from_base64(base64_string, width=200):
@@ -105,99 +180,125 @@ def filter_values(values, search_term):
     search_term = str(search_term).lower()
     return [v for v in values if search_term in str(v).lower()]
 
-# Initialize progress for a value if not already done
-def ensure_progress_initialized(value):
-    if value not in st.session_state.progress:
-        st.session_state.progress[value] = {'location': False, 'image': False}
-
-# Combined function to save data (location or image)
-def save_data(value, data_type, data):
-    # Make sure progress is initialized
-    ensure_progress_initialized(value)
+# Get and save location
+def get_and_save_location(value, prefix=""):
+    # Make a unique location request key for this value and prefix
+    loc_request_key = f"{prefix}_{value}"
     
-    # Initialize column if needed
-    column_name = f"{st.session_state.selected_column}_{data_type}"
-    if column_name not in st.session_state.data.columns:
-        st.session_state.data[column_name] = None
-        
-    # Set the correct session state tracking variable
-    if data_type == "location":
-        st.session_state.location_column = column_name
-    else:  # image
-        st.session_state.image_column = column_name
+    # If we haven't already requested location for this key
+    if loc_request_key not in st.session_state.location_requested:
+        st.session_state.location_requested[loc_request_key] = False
     
-    # Find the row index for the value and save the data
-    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == str(value)].index
-    if not row_idx.empty:
-        # Save the data in the dataframe
-        st.session_state.data.loc[row_idx, column_name] = data
+    # Button to get location OR continue if already requested
+    if st.button(f"📍 Get Location for {value}", key=f"{prefix}_getloc_{value}") or st.session_state.location_requested[loc_request_key]:
+        # Set flag that we've requested location
+        st.session_state.location_requested[loc_request_key] = True
         
-        # Update progress tracking - mark as completed
-        st.session_state.progress[value][data_type] = True
+        try:
+            with st.spinner("Getting your location..."):
+                # Use streamlit-js-eval to get location data
+                location_data = get_geolocation()
+                
+                # Better type checking for location_data
+                if location_data is None or not isinstance(location_data, dict):
+                    st.warning("Waiting for location permission... If no prompt appears, please check your browser settings.")
+                    
+                    st.components.v1.html("""
+                    <script>
+                    if (navigator.geolocation) {
+                        document.write("<p>Please allow location access when prompted by your browser.</p>");
+                    } else {
+                        document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
+                    }
+                    </script>
+                    """, height=100)
+                    
+                    # Add manual refresh and cancel options
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("I've granted permission - refresh", key=f"{prefix}_refresh_{value}"):
+                            st.rerun()
+                    with col2:
+                        if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
+                            st.session_state.location_requested[loc_request_key] = False
+                            st.rerun()
+                elif isinstance(location_data, dict) and 'coords' in location_data:
+                    # We have the location data!
+                    coords = location_data['coords']
+                    latitude = coords['latitude']
+                    longitude = coords['longitude']
+                    
+                    # Save to dataframe
+                    if save_location(value, latitude, longitude):
+                        st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
+                        # Reset flag
+                        st.session_state.location_requested[loc_request_key] = False
+                        return True
+                    else:
+                        st.error("Failed to save location data")
+                else:
+                    st.error("Unexpected response from geolocation service.")
+        except Exception as e:
+            st.error(f"Error getting location: {str(e)}")
         
-        # Show success message
-        st.success(f"{data_type.capitalize()} saved successfully!")
-        return True
+        # Manual entry as fallback
+        st.write("Enter coordinates manually:")
+        col1, col2 = st.columns(2)
+        with col1:
+            man_lat = st.number_input("Latitude", value=0.0, format="%.7f", key=f"{prefix}_manlat_{value}")
+        with col2:
+            man_lng = st.number_input("Longitude", value=0.0, format="%.7f", key=f"{prefix}_manlng_{value}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Save Manual Coordinates", key=f"{prefix}_saveman_{value}"):
+                if save_location(value, man_lat, man_lng):
+                    st.success(f"Manual location saved: {man_lat}, {man_lng}")
+                    st.session_state.location_requested[loc_request_key] = False
+                    return True
+        with col2:
+            if st.button("Cancel Location", key=f"{prefix}_cancelall_{value}"):
+                st.session_state.location_requested[loc_request_key] = False
+                st.rerun()
     
-    st.error(f"Failed to find row for value: {value}")
     return False
 
-# Function to handle location capture
-def capture_location(value):
-    # Make sure progress is initialized
-    ensure_progress_initialized(value)
-    
-    # Set a key for tracking location request for this value
-    location_key = f"loc_{value}"
-    if location_key not in st.session_state.location_requested:
-        st.session_state.location_requested[location_key] = False
-    
-    # If location already captured, return
-    if st.session_state.progress[value]['location']:
-        return True
+# Sidebar camera implementation
+def show_camera_sidebar(value):
+    with st.sidebar:
+        st.title(f"Take Photo for {value}")
         
-    # Begin location process
-    with st.spinner("Getting your location..."):
-        # Get location data using streamlit_js_eval
-        location_data = get_geolocation()
+        # Add camera input in the sidebar
+        photo = st.camera_input("Camera", key=f"sidebar_cam_{value}")
         
-        # Check if location data is available
-        if location_data and isinstance(location_data, dict) and 'coords' in location_data:
-            # Extract coordinates
-            coords = location_data['coords']
-            latitude = coords['latitude']
-            longitude = coords['longitude']
-            
-            # Format location string
-            location_str = f"{latitude}, {longitude}"
-            
-            # Save location data to dataframe
-            if save_data(value, "location", location_str):
-                # Reset location requested flag
-                st.session_state.location_requested[location_key] = False
-                return True
-        else:
-            # Show waiting message
-            st.warning("Waiting for location permission... Please allow location access when prompted.")
-            
-            # Show browser prompt helper
-            st.components.v1.html("""
-            <script>
-            if (navigator.geolocation) {
-                document.write("<p>Please allow location access when prompted by your browser.</p>");
-            } else {
-                document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
-            }
-            </script>
-            """, height=80)
-            
-            # Set location requested flag
-            st.session_state.location_requested[location_key] = True
-    
-    return False
+        # Cancel button
+        if st.button("Cancel", key=f"sidebar_cancel_{value}"):
+            st.session_state.camera_sidebar_active = False
+            st.session_state.camera_value = None
+            st.rerun()
+        
+        # Process the captured image
+        if photo is not None:
+            try:
+                # Get image data
+                image_data = photo.getvalue()
+                # Process and save the image
+                if save_image(value, image_data):
+                    st.success("Photo saved successfully!")
+                    # Turn off camera
+                    st.session_state.camera_sidebar_active = False
+                    st.session_state.camera_value = None
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error saving photo: {e}")
 
 # Main app
 def main():
+    # Check if camera sidebar is active
+    if st.session_state.camera_sidebar_active and st.session_state.camera_value:
+        show_camera_sidebar(st.session_state.camera_value)
+    
+    # Main app content
     st.title("Data Enrichment with Location and Images")
     
     # Step 1: Upload CSV file
@@ -223,9 +324,13 @@ def main():
                 st.session_state.selected_column = selected_column
                 
                 # Initialize progress tracking for each value
-                unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique().tolist()
+                unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique()
+                
                 for value in unique_values:
-                    ensure_progress_initialized(value)
+                    if value not in st.session_state.progress:
+                        st.session_state.progress[value] = {'location': False, 'image': False}
+                    if value not in st.session_state.camera_active:
+                        st.session_state.camera_active[value] = False
                 
                 st.rerun()
         
@@ -251,7 +356,7 @@ def main():
             # Display values to enrich
             st.write("## Values to enrich")
             
-            # Create tabs for "In Progress", "Completed", and "All Values"
+            # Create tabs for "In Progress" and "Completed"
             in_progress_tab, completed_tab, all_tab = st.tabs(["In Progress", "Completed", "All Values"])
             
             # Helper functions for grouping values
@@ -267,160 +372,78 @@ def main():
                     st.session_state.progress.get(v, {}).get('image', False)
                 )]
             
-            # Show camera for active value if any
-            if st.session_state.active_camera:
-                value = st.session_state.active_camera
-                st.write(f"## Take Photo for {value}")
-                photo = st.camera_input("Camera", key="camera_main")
-                
-                if photo is not None:
-                    try:
-                        # Compress and encode the image
-                        base64_image = compress_and_encode_image(photo.getvalue())
-                        
-                        if base64_image and save_data(value, "image", base64_image):
-                            # Reset active camera after successful save
-                            st.session_state.active_camera = None
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Error saving photo: {e}")
-                
-                if st.button("Cancel", key="cancel_camera"):
-                    st.session_state.active_camera = None
-                    st.rerun()
-            else:
-                # In Progress Tab
-                with in_progress_tab:
-                    in_progress_values = get_in_progress_values()
-                    if in_progress_values:
-                        for value in in_progress_values:
-                            ensure_progress_initialized(value)
-                            with st.expander(f"{value}"):
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    loc_status = "✅" if st.session_state.progress.get(value, {}).get('location', False) else "❌"
-                                    st.write(f"Location: {loc_status}")
-                                    
-                                    # Only show location button if location not captured yet
-                                    if not st.session_state.progress.get(value, {}).get('location', False):
-                                        if st.button(f"📍 Get Location", key=f"loc_btn_{value}"):
-                                            if capture_location(value):
-                                                st.rerun()
-                                
-                                with col2:
-                                    img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
-                                    st.write(f"Image: {img_status}")
-                                    
-                                    # Only show camera button if image not captured yet
-                                    if not st.session_state.progress.get(value, {}).get('image', False):
-                                        if st.button(f"📸 Take Photo", key=f"img_btn_{value}"):
-                                            st.session_state.active_camera = value
-                                            st.rerun()
-                    else:
-                        if st.session_state.search_term:
-                            st.info(f"No in-progress values match your search: '{st.session_state.search_term}'")
-                        else:
-                            st.info("No values in progress - all are completed!")
-                    
-                # Completed Tab
-                with completed_tab:
-                    completed_values = get_completed_values()
-                    if completed_values:
-                        for value in completed_values:
-                            ensure_progress_initialized(value)
-                            with st.expander(f"{value} ✅"):
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.write("Location: ✅")
-                                    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
-                                    loc_col = st.session_state.location_column
-                                    if loc_col and loc_col in st.session_state.data.columns:
-                                        loc_data = st.session_state.data.loc[row_idx, loc_col]
-                                        st.write(f"Saved location: {loc_data}")
-                                
-                                with col2:
-                                    st.write("Image: ✅")
-                                    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
-                                    img_col = st.session_state.image_column
-                                    if img_col and img_col in st.session_state.data.columns:
-                                        base64_image = st.session_state.data.loc[row_idx, img_col]
-                                        display_image_from_base64(base64_image)
-                    else:
-                        if st.session_state.search_term:
-                            st.info(f"No completed values match your search: '{st.session_state.search_term}'")
-                        else:
-                            st.info("No completed values yet!")
-                    
-                # All Values Tab
-                with all_tab:
-                    if len(filtered_values) > 0:
-                        for value in filtered_values:
-                            ensure_progress_initialized(value)
-                            location_done = st.session_state.progress.get(value, {}).get('location', False)
-                            image_done = st.session_state.progress.get(value, {}).get('image', False)
-                            status = "✅" if location_done and image_done else "🔄"
+            # In Progress Tab
+            with in_progress_tab:
+                in_progress_values = get_in_progress_values()
+                if in_progress_values:
+                    for value in in_progress_values:
+                        with st.expander(f"{value}"):
+                            col1, col2 = st.columns(2)
                             
-                            with st.expander(f"{value} {status}"):
-                                col1, col2 = st.columns(2)
+                            with col1:
+                                loc_status = "✅" if st.session_state.progress.get(value, {}).get('location', False) else "❌"
+                                st.write(f"Location: {loc_status}")
                                 
-                                with col1:
-                                    loc_status = "✅" if location_done else "❌"
-                                    st.write(f"Location: {loc_status}")
-                                    
-                                    if not location_done:
-                                        if st.button(f"📍 Get Location", key=f"all_loc_btn_{value}"):
-                                            if capture_location(value):
-                                                st.rerun()
-                                    else:
-                                        row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
-                                        loc_col = st.session_state.location_column
-                                        if loc_col and loc_col in st.session_state.data.columns:
-                                            loc_data = st.session_state.data.loc[row_idx, loc_col]
-                                            st.write(f"Saved location: {loc_data}")
+                                # Only show location button if location not captured yet
+                                if not st.session_state.progress.get(value, {}).get('location', False):
+                                    if get_and_save_location(value, prefix="ip"):
+                                        st.rerun()
+                            
+                            with col2:
+                                img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
+                                st.write(f"Image: {img_status}")
                                 
-                                with col2:
-                                    img_status = "✅" if image_done else "❌"
-                                    st.write(f"Image: {img_status}")
-                                    
-                                    if not image_done:
-                                        if st.button(f"📸 Take Photo", key=f"all_img_btn_{value}"):
-                                            st.session_state.active_camera = value
-                                            st.rerun()
-                                    else:
-                                        row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
-                                        img_col = st.session_state.image_column
-                                        if img_col and img_col in st.session_state.data.columns:
-                                            base64_image = st.session_state.data.loc[row_idx, img_col]
-                                            display_image_from_base64(base64_image)
+                                # Only show camera button if image not captured yet
+                                if not st.session_state.progress.get(value, {}).get('image', False):
+                                    if st.button(f"📸 Take Photo for {value}", key=f"ip_activate_{value}"):
+                                        st.session_state.camera_sidebar_active = True
+                                        st.session_state.camera_value = value
+                                        st.rerun()
+                else:
+                    if st.session_state.search_term:
+                        st.info(f"No in-progress values match your search: '{st.session_state.search_term}'")
                     else:
-                        st.info(f"No values match your search: '{st.session_state.search_term}'")
-            
-            # Display progress stats
-            total = len(unique_values)
-            completed_count = len([v for v in unique_values if (
-                st.session_state.progress.get(v, {}).get('location', False) and 
-                st.session_state.progress.get(v, {}).get('image', False)
-            )])
-            
-            progress_pct = int(completed_count/total*100) if total else 0
-            st.write(f"## Progress: {completed_count}/{total} values completed ({progress_pct}%)")
-            
-            # Download section
-            st.write("## Download Enriched Data")
-            st.write("When you are finished, you can download the enriched data.")
-            
-            if st.button("Prepare Download"):
-                st.markdown(get_csv_download_link(st.session_state.data), unsafe_allow_html=True)
+                        st.info("No values in progress - all are completed!")
                 
-            # Option to start over
-            if st.button("Start Over"):
-                # Clear the session state
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
-
-# Run the app
-if __name__ == "__main__":
-    main()
+            # Completed Tab
+            with completed_tab:
+                completed_values = get_completed_values()
+                if completed_values:
+                    for value in completed_values:
+                        with st.expander(f"{value} ✅"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.write("Location: ✅")
+                                row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
+                                loc_col = st.session_state.location_column
+                                if loc_col and loc_col in st.session_state.data.columns:
+                                    loc_data = st.session_state.data.loc[row_idx, loc_col]
+                                    st.write(f"Saved location: {loc_data}")
+                            
+                            with col2:
+                                st.write("Image: ✅")
+                                row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
+                                img_col = st.session_state.image_column
+                                if img_col and img_col in st.session_state.data.columns:
+                                    base64_image = st.session_state.data.loc[row_idx, img_col]
+                                    display_image_from_base64(base64_image)
+                else:
+                    if st.session_state.search_term:
+                        st.info(f"No completed values match your search: '{st.session_state.search_term}'")
+                    else:
+                        st.info("No completed values yet!")
+                
+            # All Values Tab
+            with all_tab:
+                if len(filtered_values) > 0:
+                    for value in filtered_values:
+                        location_done = st.session_state.progress.get(value, {}).get('location', False)
+                        image_done = st.session_state.progress.get(value, {}).get('image', False)
+                        status = "✅" if location_done and image_done else "🔄"
+                        
+                        with st.expander(f"{value} {status}"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                loc_status = "✅" if locati
