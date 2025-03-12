@@ -62,6 +62,13 @@ st.markdown("""
         max-height: 400px !important;
     }
     
+    /* Fix for back camera aspect ratio */
+    .stCamera video {
+        aspect-ratio: 3/4 !important;
+        max-height: 400px !important;
+        object-fit: cover !important;
+    }
+    
     /* Camera container modifications */
     .camera-container {
         max-width: 500px !important;
@@ -95,6 +102,12 @@ def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
     try:
         # Open the image
         img = Image.open(BytesIO(image_data))
+        
+        # Convert RGBA to RGB if needed
+        if img.mode == 'RGBA':
+            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+            img = rgb_img
         
         # Resize if larger than max_size
         if img.width > max_size[0] or img.height > max_size[1]:
@@ -282,8 +295,14 @@ def main():
                 value = st.session_state.active_capture_value
                 st.subheader(f"Taking Photo for: {value}")
                 
-                # Use back camera component instead of standard camera input
-                photo = back_camera_input("Camera", key=f"cam_{value}")
+                # Add container with aspect ratio control
+                with st.container():
+                    st.markdown('<div class="camera-container">', unsafe_allow_html=True)
+                    
+                    # Use back camera component with custom parameters
+                    photo = back_camera_input("Camera", key=f"cam_{value}")
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
                 
                 # Cancel button
                 if st.button("Cancel", key=f"cam_cancel_{value}"):
@@ -303,6 +322,7 @@ def main():
                             st.rerun()
                     except Exception as e:
                         st.error(f"Error saving photo: {e}")
+                        st.error("Please try taking another photo or cancel and try again.")
                         
                 # Early return if we're capturing an image
                 return
