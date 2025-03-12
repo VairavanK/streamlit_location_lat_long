@@ -6,6 +6,136 @@ from datetime import datetime
 from io import BytesIO
 import uuid
 from PIL import Image
+import streamlit.components.v1 as components
+
+st.markdown("""
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+    /* Mobile-friendly styling */
+    @media (max-width: 768px) {
+        .stButton button {
+            width: 100%;
+            padding: 15px 0;
+            margin-bottom: 10px;
+        }
+        
+        /* Make the app full width on mobile */
+        .main .block-container {
+            padding-left: 5px;
+            padding-right: 5px;
+            max-width: 100%;
+        }
+        
+        /* Make expanders more touch-friendly */
+        .streamlit-expanderHeader {
+            font-size: 1.2rem;
+            padding: 12px 0;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
+# Custom component to use back camera
+def camera_input_with_back_camera(label, key=None):
+    # Generate a unique key if not provided
+    camera_key = key or f"camera_{uuid.uuid4()}"
+    
+    # Create a container for our custom camera component
+    camera_container = st.container()
+    
+    with camera_container:
+        # Create a button to trigger camera
+        if st.button(f"📸 {label}", key=f"btn_{camera_key}"):
+            # Custom HTML/JS component for camera access with back camera preference
+            components.html(
+                f"""
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                    <video id="video_{camera_key}" width="100%" autoplay style="margin-bottom: 10px;"></video>
+                    <button id="capture_{camera_key}" style="padding: 10px; background: #4CAF50; color: white; 
+                            border: none; border-radius: 5px; cursor: pointer;">
+                        Take Photo
+                    </button>
+                    <canvas id="canvas_{camera_key}" style="display:none;"></canvas>
+                    <img id="photo_{camera_key}" style="margin-top: 10px; max-width: 100%;" />
+                </div>
+                <script>
+                    const video = document.getElementById('video_{camera_key}');
+                    const canvas = document.getElementById('canvas_{camera_key}');
+                    const photo = document.getElementById('photo_{camera_key}');
+                    const captureButton = document.getElementById('capture_{camera_key}');
+                    
+                    // Prefer back camera
+                    const constraints = {{
+                        video: {{
+                            facingMode: "environment"
+                        }}
+                    }};
+                    
+                    // Access the camera
+                    async function startCamera() {{
+                        try {{
+                            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                            video.srcObject = stream;
+                            
+                            // Set up event listener for the capture button
+                            captureButton.addEventListener('click', function() {{
+                                // Set canvas dimensions to match video
+                                canvas.width = video.videoWidth;
+                                canvas.height = video.videoHeight;
+                                
+                                // Draw the video frame to the canvas
+                                const context = canvas.getContext('2d');
+                                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                                
+                                // Convert canvas to image
+                                const imageData = canvas.toDataURL('image/jpeg');
+                                photo.src = imageData;
+                                photo.style.display = 'block';
+                                
+                                // Send data to Streamlit
+                                const image_data = imageData.split(',')[1];  // Remove data URL prefix
+                                const data = {{
+                                    key: "{camera_key}",
+                                    imageData: image_data
+                                }};
+                                
+                                // Stop camera stream
+                                const tracks = video.srcObject.getTracks();
+                                tracks.forEach(track => track.stop());
+                                video.style.display = 'none';
+                                captureButton.style.display = 'none';
+                                
+                                // Send to Streamlit
+                                window.parent.postMessage({{
+                                    type: "streamlit:setComponentValue",
+                                    value: data
+                                }}, "*");
+                            }});
+                        }} catch (err) {{
+                            console.error('Error accessing camera: ', err);
+                        }}
+                    }}
+                    
+                    // Start the camera when the component loads
+                    startCamera();
+                </script>
+                """,
+                height=500,
+                key=f"html_{camera_key}"
+            )
+            
+        # Create a placeholder for Streamlit to store the captured image
+        image_data = st.session_state.get(camera_key, None)
+        
+        if image_data and isinstance(image_data, dict) and 'imageData' in image_data:
+            # Convert base64 image data to binary
+            import base64
+            from io import BytesIO
+            
+            binary_image = BytesIO(base64.b64decode(image_data['imageData']))
+            return binary_image
+            
+    return None
+
 # Ensure data directories exist in writable locations
 UPLOAD_FOLDER = "uploaded_files"
 IMAGE_FOLDER = "captured_images"
@@ -222,7 +352,7 @@ if st.session_state.data is not None:
                             # Only show camera button if image not captured yet
                             if not st.session_state.progress.get(value, {}).get('image', False):
                                 # Capture image using webcam
-                                img_file = st.camera_input(f"Take a picture for {value}", key=f"cam_{value}")
+                                img_file = camera_input_with_back_camera(f"Take a picture for {value}", key=f"cam_{value}")
                                 if img_file is not None:
                                     save_image(value, img_file.getvalue())
             else:
@@ -288,7 +418,7 @@ if st.session_state.data is not None:
                         st.write(f"Image: {img_status}")
                         
                         if not image_done:
-                            img_file = st.camera_input(f"Take a picture for {value}", key=f"all_cam_{value}")
+                            img_file = camera_input_with_back_camera(f"Take a picture for {value}", key=f"all_cam_{value}")
                             if img_file is not None:
                                 save_image(value, img_file.getvalue())
                         else:
