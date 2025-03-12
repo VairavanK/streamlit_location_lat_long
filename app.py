@@ -40,6 +40,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Custom component to use back camera
+# Custom component to use back camera
 def camera_input_with_back_camera(label, key=None):
     # Generate a unique key if not provided
     camera_key = key or f"camera_{uuid.uuid4()}"
@@ -51,6 +52,8 @@ def camera_input_with_back_camera(label, key=None):
         # Create a button to trigger camera
         if st.button(f"📸 {label}", key=f"btn_{camera_key}"):
             # Custom HTML/JS component for camera access with back camera preference
+            # Note: Using a unique height value instead of a key parameter
+            html_height = 500
             components.html(
                 f"""
                 <div style="display: flex; flex-direction: column; align-items: center;">
@@ -124,8 +127,8 @@ def camera_input_with_back_camera(label, key=None):
                     startCamera();
                 </script>
                 """,
-                height=500,
-                key=f"html_{camera_key}"
+                height=html_height,
+                # Remove the key parameter which is causing the error
             )
             
         # Create a placeholder for Streamlit to store the captured image
@@ -140,6 +143,7 @@ def camera_input_with_back_camera(label, key=None):
             return binary_image
             
     return None
+
 
 # Create directories for storing data if they don't exist
 # Ensure data directories exist in writable locations
