@@ -1,20 +1,25 @@
 import streamlit as st
 from streamlit_js_eval import get_geolocation
 
-st.title("Location Test")
+st.title("Simple Location App")
 
-# Diagnostic button
-if st.button("TEST: Get Location"):
-    st.write("Button clicked! Requesting location...")
-    
-    try:
-        location = get_geolocation()
-        st.write("Raw location data:")
-        st.write(location)
-        
-        if location and 'coords' in location:
-            st.success(f"Location found! {location['coords']['latitude']}, {location['coords']['longitude']}")
+# Initialize session state
+if 'location_data' not in st.session_state:
+    st.session_state.location_data = None
+
+# Button to get location
+if st.button("Get My Location"):
+    with st.spinner("Getting your location..."):
+        location_data = get_geolocation()
+        if location_data and 'coords' in location_data:
+            st.session_state.location_data = location_data
         else:
-            st.error("No location data received")
-    except Exception as e:
-        st.error(f"Error: {e}")
+            st.warning("Please allow location access in your browser.")
+
+# Display location and download button if we have the data
+if st.session_state.location_data and 'coords' in st.session_state.location_data:
+    coords = st.session_state.location_data['coords']
+    latitude = coords['latitude']
+    longitude = coords['longitude']
+    
+    st.success(f"Location: {latitude:.6f}, {longitude:.6f}")
