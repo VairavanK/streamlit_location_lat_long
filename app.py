@@ -1,3 +1,5 @@
+# Modified app.py with standard camera input but better saving logic
+
 import streamlit as st
 import pandas as pd
 import os
@@ -6,12 +8,11 @@ from datetime import datetime
 from io import BytesIO
 import uuid
 from PIL import Image
-import streamlit.components.v1 as components
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling
+# Add mobile-friendly styling and camera instructions
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -36,117 +37,37 @@ st.markdown("""
             padding: 12px 0;
         }
     }
+    
+    /* Enhanced camera button */
+    .big-camera-button {
+        display: block;
+        width: 100%;
+        padding: 15px;
+        background-color: #1E88E5;
+        color: white;
+        text-align: center;
+        font-size: 16px;
+        margin-top: 10px;
+        border-radius: 5px;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    
+    /* Improve camera UI */
+    .stCamera > button {
+        background-color: #4CAF50 !important;
+        color: white !important;
+        padding: 10px 20px !important;
+        font-size: 16px !important;
+        border-radius: 5px !important;
+        margin-top: 10px !important;
+        width: 100% !important;
+        border: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Custom component to use back camera
-# Custom component to use back camera
-def camera_input_with_back_camera(label, key=None):
-    # Generate a unique key if not provided
-    camera_key = key or f"camera_{uuid.uuid4()}"
-    
-    # Create a container for our custom camera component
-    camera_container = st.container()
-    
-    with camera_container:
-        # Create a button to trigger camera
-        if st.button(f"📸 {label}", key=f"btn_{camera_key}"):
-            # Custom HTML/JS component for camera access with back camera preference
-            # Note: Using a unique height value instead of a key parameter
-            html_height = 500
-            components.html(
-                f"""
-                <div style="display: flex; flex-direction: column; align-items: center;">
-                    <video id="video_{camera_key}" width="100%" autoplay style="margin-bottom: 10px;"></video>
-                    <button id="capture_{camera_key}" style="padding: 10px; background: #4CAF50; color: white; 
-                            border: none; border-radius: 5px; cursor: pointer;">
-                        Take Photo
-                    </button>
-                    <canvas id="canvas_{camera_key}" style="display:none;"></canvas>
-                    <img id="photo_{camera_key}" style="margin-top: 10px; max-width: 100%;" />
-                </div>
-                <script>
-                    const video = document.getElementById('video_{camera_key}');
-                    const canvas = document.getElementById('canvas_{camera_key}');
-                    const photo = document.getElementById('photo_{camera_key}');
-                    const captureButton = document.getElementById('capture_{camera_key}');
-                    
-                    // Prefer back camera
-                    const constraints = {{
-                        video: {{
-                            facingMode: "environment"
-                        }}
-                    }};
-                    
-                    // Access the camera
-                    async function startCamera() {{
-                        try {{
-                            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                            video.srcObject = stream;
-                            
-                            // Set up event listener for the capture button
-                            captureButton.addEventListener('click', function() {{
-                                // Set canvas dimensions to match video
-                                canvas.width = video.videoWidth;
-                                canvas.height = video.videoHeight;
-                                
-                                // Draw the video frame to the canvas
-                                const context = canvas.getContext('2d');
-                                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                                
-                                // Convert canvas to image
-                                const imageData = canvas.toDataURL('image/jpeg');
-                                photo.src = imageData;
-                                photo.style.display = 'block';
-                                
-                                // Send data to Streamlit
-                                const image_data = imageData.split(',')[1];  // Remove data URL prefix
-                                const data = {{
-                                    key: "{camera_key}",
-                                    imageData: image_data
-                                }};
-                                
-                                // Stop camera stream
-                                const tracks = video.srcObject.getTracks();
-                                tracks.forEach(track => track.stop());
-                                video.style.display = 'none';
-                                captureButton.style.display = 'none';
-                                
-                                // Send to Streamlit
-                                window.parent.postMessage({{
-                                    type: "streamlit:setComponentValue",
-                                    value: data
-                                }}, "*");
-                            }});
-                        }} catch (err) {{
-                            console.error('Error accessing camera: ', err);
-                        }}
-                    }}
-                    
-                    // Start the camera when the component loads
-                    startCamera();
-                </script>
-                """,
-                height=html_height,
-                # Remove the key parameter which is causing the error
-            )
-            
-        # Create a placeholder for Streamlit to store the captured image
-        image_data = st.session_state.get(camera_key, None)
-        
-        if image_data and isinstance(image_data, dict) and 'imageData' in image_data:
-            # Convert base64 image data to binary
-            import base64
-            from io import BytesIO
-            
-            binary_image = BytesIO(base64.b64decode(image_data['imageData']))
-            return binary_image
-            
-    return None
-
-
-# Create directories for storing data if they don't exist
-# Ensure data directories exist in writable locations
+# Create directories for storing data
 try:
     UPLOAD_FOLDER = "uploaded_files"
     IMAGE_FOLDER = "captured_images"
@@ -156,7 +77,7 @@ try:
     if not os.path.exists(IMAGE_FOLDER):
         os.makedirs(IMAGE_FOLDER)
 except PermissionError:
-    # Fall back to temp directory if permission issues on deployment
+    # Fall back to temp directory if permission issues
     import tempfile
     temp_dir = tempfile.gettempdir()
     UPLOAD_FOLDER = os.path.join(temp_dir, "uploaded_files")
@@ -200,7 +121,7 @@ def get_csv_download_link(df):
     b64 = base64.b64encode(csv.encode()).decode()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"enriched_data_{timestamp}.csv"
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download Enriched CSV</a>'
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="big-camera-button">Download Enriched CSV</a>'
     return href
 
 # Save location data
@@ -230,20 +151,26 @@ def save_image(value, image_data):
     image_filename = f"{st.session_state.session_id}_{value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     image_path = os.path.join(IMAGE_FOLDER, image_filename)
     
-    with open(image_path, "wb") as f:
-        f.write(image_data)
-    
-    # Find the row index for the value
-    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index
-    if not row_idx.empty:
-        st.session_state.data.loc[row_idx, st.session_state.image_column] = image_path
-        st.session_state.progress[value]['image'] = True
-        save_session_data()
-        st.success(f"Image saved for {value}")
-        st.rerun()
+    try:
+        with open(image_path, "wb") as f:
+            f.write(image_data)
+        
+        # Find the row index for the value
+        row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index
+        if not row_idx.empty:
+            st.session_state.data.loc[row_idx, st.session_state.image_column] = image_path
+            st.session_state.progress[value]['image'] = True
+            save_session_data()
+            st.success(f"Image saved for {value}")
+            st.rerun()
+    except Exception as e:
+        st.error(f"Error saving image: {e}")
 
 # Main app layout
 st.title("Data Enrichment with Location and Images")
+
+# Camera instructions - make this prominent
+st.info("📱 **Mobile users**: Tap the camera switch icon during capture to use the back camera.")
 
 # Step 1: Upload CSV file or recover session
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
@@ -349,10 +276,31 @@ if st.session_state.data is not None:
                             
                             # Only show camera button if image not captured yet
                             if not st.session_state.progress.get(value, {}).get('image', False):
-                                # Use our custom back camera function instead
-                                img_file = camera_input_with_back_camera(f"Take picture for {value}", key=f"cam_{value}")
+                                # Add a camera button with clear styling
+                                st.markdown(
+                                    f'<div class="big-camera-button">Take Photo for {value}</div>', 
+                                    unsafe_allow_html=True
+                                )
+                                
+                                # Standard camera input
+                                img_file = st.camera_input(f"", key=f"cam_{value}")
                                 if img_file is not None:
-                                    save_image(value, img_file.getvalue())
+                                    # Make the image save process more robust
+                                    try:
+                                        # Debug information
+                                        st.write(f"Image captured, processing...")
+                                        
+                                        # Get the image data
+                                        image_data = img_file.getvalue()
+                                        
+                                        # Save image
+                                        save_image(value, image_data)
+                                        st.success(f"Image saved for {value}")
+                                        
+                                        # Force a refresh to update the status
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error processing image: {e}")
             else:
                 st.info("No values in progress - all are completed!")
                 
@@ -416,10 +364,21 @@ if st.session_state.data is not None:
                         st.write(f"Image: {img_status}")
                         
                         if not image_done:
-                            # Use our custom back camera function
-                            img_file = camera_input_with_back_camera(f"Take picture for {value}", key=f"all_cam_{value}")
+                            # Add a camera button with clear styling
+                            st.markdown(
+                                f'<div class="big-camera-button">Take Photo for {value}</div>', 
+                                unsafe_allow_html=True
+                            )
+                            
+                            # Standard camera input
+                            img_file = st.camera_input(f"", key=f"all_cam_{value}")
                             if img_file is not None:
-                                save_image(value, img_file.getvalue())
+                                try:
+                                    st.write(f"Image captured, processing...")
+                                    image_data = img_file.getvalue()
+                                    save_image(value, image_data)
+                                except Exception as e:
+                                    st.error(f"Error processing image: {e}")
                         else:
                             row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
                             img_col = st.session_state.image_column
