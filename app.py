@@ -64,6 +64,8 @@ if 'image_column' not in st.session_state:
     st.session_state.image_column = None
 if 'active_camera' not in st.session_state:
     st.session_state.active_camera = None
+if 'location_requested' not in st.session_state:
+    st.session_state.location_requested = {}
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -127,10 +129,13 @@ def save_data(value, data_type, data):
     # Find the row index for the value and save the data
     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == str(value)].index
     if not row_idx.empty:
+        # Save the data in the dataframe
         st.session_state.data.loc[row_idx, column_name] = data
         
         # Update progress tracking - mark as completed
         st.session_state.progress[value][data_type] = True
+        
+        # Show success message
         st.success(f"{data_type.capitalize()} saved successfully!")
         return True
     
@@ -139,37 +144,55 @@ def save_data(value, data_type, data):
 
 # Function to handle location capture
 def capture_location(value):
+    # Make sure progress is initialized
     ensure_progress_initialized(value)
     
-    try:
-        with st.spinner("Getting your location..."):
-            location_data = get_geolocation()
+    # Set a key for tracking location request for this value
+    location_key = f"loc_{value}"
+    if location_key not in st.session_state.location_requested:
+        st.session_state.location_requested[location_key] = False
+    
+    # If location already captured, return
+    if st.session_state.progress[value]['location']:
+        return True
+        
+    # Begin location process
+    with st.spinner("Getting your location..."):
+        # Get location data using streamlit_js_eval
+        location_data = get_geolocation()
+        
+        # Check if location data is available
+        if location_data and isinstance(location_data, dict) and 'coords' in location_data:
+            # Extract coordinates
+            coords = location_data['coords']
+            latitude = coords['latitude']
+            longitude = coords['longitude']
             
-            if location_data is None or not isinstance(location_data, dict):
-                st.warning("Waiting for location permission... Please allow location access when prompted.")
-                
-                st.components.v1.html("""
-                <script>
-                if (navigator.geolocation) {
-                    document.write("<p>Please allow location access when prompted by your browser.</p>");
-                } else {
-                    document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
-                }
-                </script>
-                """, height=80)
-                
-                return False
-                
-            elif isinstance(location_data, dict) and 'coords' in location_data:
-                coords = location_data['coords']
-                latitude = coords['latitude']
-                longitude = coords['longitude']
-                
-                # Save location data
-                location_str = f"{latitude}, {longitude}"
-                return save_data(value, "location", location_str)
-    except Exception as e:
-        st.error(f"Error getting location: {str(e)}")
+            # Format location string
+            location_str = f"{latitude}, {longitude}"
+            
+            # Save location data to dataframe
+            if save_data(value, "location", location_str):
+                # Reset location requested flag
+                st.session_state.location_requested[location_key] = False
+                return True
+        else:
+            # Show waiting message
+            st.warning("Waiting for location permission... Please allow location access when prompted.")
+            
+            # Show browser prompt helper
+            st.components.v1.html("""
+            <script>
+            if (navigator.geolocation) {
+                document.write("<p>Please allow location access when prompted by your browser.</p>");
+            } else {
+                document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
+            }
+            </script>
+            """, height=80)
+            
+            # Set location requested flag
+            st.session_state.location_requested[location_key] = True
     
     return False
 
@@ -248,7 +271,7 @@ def main():
             if st.session_state.active_camera:
                 value = st.session_state.active_camera
                 st.write(f"## Take Photo for {value}")
-                photo = st.camera_input("Camera", key=f"camera_main")
+                photo = st.camera_input("Camera", key="camera_main")
                 
                 if photo is not None:
                     try:
@@ -281,7 +304,7 @@ def main():
                                     
                                     # Only show location button if location not captured yet
                                     if not st.session_state.progress.get(value, {}).get('location', False):
-                                        if st.button(f"📍 Get Location", key=f"loc_{value}"):
+                                        if st.button(f"📍 Get Location", key=f"loc_btn_{value}"):
                                             if capture_location(value):
                                                 st.rerun()
                                 
@@ -347,7 +370,7 @@ def main():
                                     st.write(f"Location: {loc_status}")
                                     
                                     if not location_done:
-                                        if st.button(f"📍 Get Location", key=f"all_loc_{value}"):
+                                        if st.button(f"📍 Get Location", key=f"all_loc_btn_{value}"):
                                             if capture_location(value):
                                                 st.rerun()
                                     else:
