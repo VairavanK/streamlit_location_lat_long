@@ -4,13 +4,13 @@ import streamlit.components.v1 as components
 
 st.title("Get Your Current Location and Download as CSV")
 
-# Initialize session state variables
+# Initialize session state for latitude and longitude
 if "latitude" not in st.session_state:
     st.session_state["latitude"] = None
 if "longitude" not in st.session_state:
     st.session_state["longitude"] = None
 
-# JavaScript to fetch user's location and update Streamlit session state
+# JavaScript to get user's geolocation and send it to Streamlit
 location_script = """
     <script>
         function getLocation() {
@@ -19,46 +19,57 @@ location_script = """
                     (position) => {
                         var lat = position.coords.latitude;
                         var lon = position.coords.longitude;
-                        // Send data to Streamlit
-                        var streamlit_data = lat + "," + lon;
-                        var url = window.location.href.split('?')[0] + "?location=" + streamlit_data;
-                        window.location.href = url;
+
+                        // Send data back to Streamlit using a temporary input element
+                        var streamlit_input = document.createElement("input");
+                        streamlit_input.type = "hidden";
+                        streamlit_input.name = "geo_data";
+                        streamlit_input.value = lat + "," + lon;
+                        document.body.appendChild(streamlit_input);
+
+                        // Simulate form submission to trigger Streamlit update
+                        var form = document.createElement("form");
+                        form.method = "POST";
+                        form.appendChild(streamlit_input);
+                        document.body.appendChild(form);
+                        form.submit();
                     },
                     (error) => {
-                        document.body.innerHTML += "<p>Location access denied.</p>";
+                        alert("Location access denied or unavailable.");
                     }
                 );
             } else {
-                document.body.innerHTML += "<p>Geolocation is not supported by this browser.</p>";
+                alert("Geolocation is not supported by this browser.");
             }
         }
     </script>
     <button onclick="getLocation()">Get Current Location</button>
 """
 
-# Render JavaScript inside Streamlit
+# Embed JavaScript in Streamlit
 components.html(location_script, height=100)
 
-# Read URL parameters for location
-query_params = st.query_params
-if "location" in query_params:
+# Capture user input sent from JavaScript
+geo_data = st.text_input("Hidden Geo Data", key="geo_data")
+
+if geo_data:
     try:
-        lat, lon = query_params["location"].split(",")
+        lat, lon = geo_data.split(",")
         st.session_state["latitude"] = lat
         st.session_state["longitude"] = lon
     except:
         st.error("Invalid location data received.")
 
-# Display coordinates if available
+# Display latitude and longitude
 if st.session_state["latitude"] and st.session_state["longitude"]:
     st.write(f"**Latitude:** {st.session_state['latitude']}")
     st.write(f"**Longitude:** {st.session_state['longitude']}")
 
-    # Create a DataFrame for CSV export
+    # Create DataFrame for CSV export
     df = pd.DataFrame({"Latitude": [st.session_state["latitude"]], "Longitude": [st.session_state["longitude"]]})
     csv_data = df.to_csv(index=False).encode("utf-8")
 
-    # CSV Download Button
+    # Download button for CSV
     st.download_button(
         label="Download CSV",
         data=csv_data,
