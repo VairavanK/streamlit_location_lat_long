@@ -57,7 +57,38 @@ st.markdown("""
     .stButton > button {
         font-weight: bold;
     }
+    
+    /* Make camera smaller */
+    .stCamera > div {
+        max-height: 400px !important;
+    }
+    
+    /* Camera container modifications */
+    .camera-container {
+        max-width: 500px !important;
+        margin: 0 auto;
+    }
 </style>
+
+<script>
+// Helper for setting back camera as default
+document.addEventListener('DOMContentLoaded', function() {
+    // Find all video elements inside stCamera
+    setTimeout(function() {
+        const videoElements = document.querySelectorAll('.stCamera video');
+        videoElements.forEach(function(video) {
+            // Attempt to switch to back camera by sending the appropriate click event
+            const container = video.closest('.stCamera');
+            if (container) {
+                const switchButton = container.querySelector('button');
+                if (switchButton) {
+                    switchButton.click();
+                }
+            }
+        });
+    }, 1000); // Wait a second for the camera to initialize
+});
+</script>
 """, unsafe_allow_html=True)
 
 # Create directory for storing session data
@@ -89,8 +120,8 @@ if 'camera_active' not in st.session_state:
     st.session_state.camera_active = {}
 if 'search_term' not in st.session_state:
     st.session_state.search_term = ""
-if 'pending_captures' not in st.session_state:
-    st.session_state.pending_captures = {}
+if 'geolocation_data' not in st.session_state:
+    st.session_state.geolocation_data = {}
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -201,26 +232,26 @@ def filter_values(values, search_term):
             filtered.append(v)
     return filtered
 
-# Completely new camera implementation using Streamlit's native camera
+# Simplified camera component that's less intrusive
 def take_photo_for_value(value):
     st.markdown(f"### Taking photo for: {value}")
     
-    # Create column layout for camera controls and preview
-    col1, col2 = st.columns([3, 1])
+    # Create a container to keep camera more compact
+    camera_container = st.container()
     
-    with col1:
-        # Display camera interface with a clear label
+    with camera_container:
+        # Apply class for styling
+        st.markdown('<div class="camera-container">', unsafe_allow_html=True)
+        
+        # Camera input
         photo = st.camera_input("", key=f"native_cam_{value}")
         
-        # Add camera instructions
-        st.info("📱 On mobile, tap the camera icon in the bottom right corner of the camera to switch cameras")
-    
-    with col2:
-        # Add manual camera controls
-        st.markdown("### Controls")
+        # Cancel button
         if st.button("Cancel", key=f"cancel_cam_{value}"):
             st.session_state.camera_active[value] = False
             st.rerun()
+            
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # Process the captured image if available
     if photo is not None:
@@ -236,121 +267,112 @@ def take_photo_for_value(value):
         except Exception as e:
             st.error(f"Error saving photo: {e}")
 
-# Completely new geolocation implementation
-def get_location_for_value(value):
+# Fixed geolocation component
+def request_geolocation(value):
+    geo_key = f"geo_{value}"
+    
+    # Create a location container
     st.markdown(f"### Getting location for: {value}")
     
-    # Create a container for the geolocation data and status
-    geo_container = st.empty()
-    
-    with geo_container.container():
-        st.info("📍 Requesting your current location...")
-        
-        # Add a cancel button
-        if st.button("Cancel", key=f"cancel_geo_{value}"):
-            # Just refresh without saving location
-            st.rerun()
-        
-        # Add the geolocation JavaScript
-        components.html(
-            f"""
-            <p id="geo-status">Waiting for location permission...</p>
+    # Use Streamlit component for geolocation
+    components.html(
+        f"""
+        <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 10px;">
+            <div id="status">Requesting your location...</div>
+            <div id="data" style="display:none;"></div>
+        </div>
+
+        <script>
+            // Function to update status
+            function updateStatus(message) {{
+                document.getElementById('status').innerHTML = message;
+            }}
             
-            <script>
-                const statusElement = document.getElementById('geo-status');
+            // Function to get location
+            function getLocation() {{
+                updateStatus("<span style='color:blue;'>Requesting permission to access your location...</span>");
                 
-                // Function to update status message
-                function updateStatus(message) {{
-                    statusElement.textContent = message;
-                    statusElement.style.color = 'blue';
-                }}
-                
-                // Function to handle errors
-                function handleError(message) {{
-                    statusElement.textContent = message;
-                    statusElement.style.color = 'red';
-                }}
-                
-                // Function to get location
-                function getLocation() {{
-                    updateStatus("Requesting location access...");
-                    
-                    if (navigator.geolocation) {{
-                        navigator.geolocation.getCurrentPosition(
-                            // Success callback
-                            function(position) {{
-                                const lat = position.coords.latitude;
-                                const lng = position.coords.longitude;
-                                const accuracy = position.coords.accuracy;
-                                
-                                updateStatus(`Location found (accuracy: ${accuracy}m)! Saving...`);
-                                
-                                // Send data to Streamlit
-                                window.parent.postMessage({{
-                                    type: "streamlit:setComponentValue",
-                                    value: {{
-                                        value: "{value}",
-                                        lat: lat,
-                                        lng: lng,
-                                        accuracy: accuracy
-                                    }}
-                                }}, "*");
-                            }},
-                            // Error callback
-                            function(error) {{
-                                switch(error.code) {{
-                                    case error.PERMISSION_DENIED:
-                                        handleError("Location permission denied.");
-                                        break;
-                                    case error.POSITION_UNAVAILABLE:
-                                        handleError("Location information unavailable.");
-                                        break;
-                                    case error.TIMEOUT:
-                                        handleError("Location request timed out.");
-                                        break;
-                                    default:
-                                        handleError("Unknown error getting location.");
+                // Check if geolocation is available
+                if (navigator.geolocation) {{
+                    navigator.geolocation.getCurrentPosition(
+                        // Success callback
+                        function(position) {{
+                            // Get coordinates
+                            const lat = position.coords.latitude;
+                            const lng = position.coords.longitude;
+                            const accuracy = position.coords.accuracy;
+                            
+                            // Display success
+                            updateStatus("<span style='color:green;'>Location found! Saving...</span>");
+                            document.getElementById('data').innerHTML = 
+                                `Latitude: ${{lat}}<br>Longitude: ${{lng}}<br>Accuracy: ${{accuracy}}m`;
+                            
+                            // Send to Streamlit
+                            window.parent.postMessage({{
+                                type: "streamlit:setComponentValue",
+                                value: {{
+                                    lat: lat,
+                                    lng: lng,
+                                    accuracy: accuracy
                                 }}
-                            }},
-                            // Options
-                            {{
-                                enableHighAccuracy: true,
-                                timeout: 10000,
-                                maximumAge: 0
+                            }}, "*");
+                        }},
+                        // Error callback
+                        function(error) {{
+                            let errorMsg = "";
+                            switch(error.code) {{
+                                case error.PERMISSION_DENIED:
+                                    errorMsg = "Location permission denied by user.";
+                                    break;
+                                case error.POSITION_UNAVAILABLE:
+                                    errorMsg = "Location information is unavailable.";
+                                    break;
+                                case error.TIMEOUT:
+                                    errorMsg = "The request to get location timed out.";
+                                    break;
+                                default:
+                                    errorMsg = "An unknown location error occurred.";
                             }}
-                        );
-                    }} else {{
-                        handleError("Geolocation is not supported by this browser.");
-                    }}
+                            updateStatus(`<span style='color:red;'>Error: ${{errorMsg}}</span>`);
+                        }},
+                        // Options
+                        {{
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
+                        }}
+                    );
+                }} else {{
+                    updateStatus("<span style='color:red;'>Geolocation is not supported by this browser.</span>");
                 }}
-                
-                // Start location request when component loads
-                getLocation();
-            </script>
-            """,
-            height=100,
-            key=f"geo_component_{value}"
-        )
+            }}
+            
+            // Get location when component loads
+            getLocation();
+        </script>
+        """,
+        height=120,
+        key=geo_key
+    )
+    
+    # Add a cancel button
+    if st.button("Cancel Location Request", key=f"cancel_geo_{value}"):
+        st.rerun()
+    
+    # Check for geolocation response
+    geo_data = st.session_state.get(geo_key)
+    
+    if isinstance(geo_data, dict) and 'lat' in geo_data and 'lng' in geo_data:
+        lat = geo_data.get('lat')
+        lng = geo_data.get('lng')
+        accuracy = geo_data.get('accuracy', 'unknown')
         
-        # Check for geolocation data returned by the component
-        geo_data = st.session_state.get(f"geo_component_{value}")
+        # Clean up session state
+        if geo_key in st.session_state:
+            del st.session_state[geo_key]
         
-        if isinstance(geo_data, dict) and 'lat' in geo_data and 'lng' in geo_data:
-            # Clear data from session state to avoid reprocessing
-            lat = geo_data['lat']
-            lng = geo_data['lng']
-            accuracy = geo_data.get('accuracy', 'unknown')
-            
-            # Clear session state
-            if f"geo_component_{value}" in st.session_state:
-                del st.session_state[f"geo_component_{value}"]
-            
-            # Save the location
-            save_location(value, lat, lng)
-            
-            # Show success message
-            st.success(f"Location saved: {lat}, {lng} (accuracy: {accuracy}m)")
-            st.rerun()
+        # Save the location data
+        save_location(value, lat, lng)
 
 # Main app layout
 st.title("Data Enrichment with Location and Images")
@@ -414,12 +436,14 @@ if st.session_state.data is not None:
             st.write(f"Showing {len(filtered_values)} of {len(unique_values)} values")
         
         # Check if photo taking is in progress
+        any_camera_active = False
         for value, is_active in list(st.session_state.camera_active.items()):
             if is_active:
                 take_photo_for_value(value)
-                # Don't show the tabs when camera is active
+                any_camera_active = True
                 break
-        else:  # No camera active, show tabs
+        
+        if not any_camera_active:
             st.write("## Values to enrich")
             
             # Create tabs for "In Progress" and "Completed"
@@ -459,7 +483,7 @@ if st.session_state.data is not None:
                                 # Only show location button if location not captured yet
                                 if not st.session_state.progress.get(value, {}).get('location', False):
                                     if st.button(f"📍 Get Location for {value}", key=f"loc_{value}"):
-                                        get_location_for_value(value)
+                                        request_geolocation(value)
                             
                             with col2:
                                 img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
@@ -522,7 +546,7 @@ if st.session_state.data is not None:
                                 
                                 if not location_done:
                                     if st.button(f"📍 Get Location for {value}", key=f"all_loc_{value}"):
-                                        get_location_for_value(value)
+                                        request_geolocation(value)
                                 else:
                                     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                                     loc_col = st.session_state.location_column
