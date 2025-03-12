@@ -364,7 +364,7 @@ def request_geolocation(value):
                                 
                                 // Display values
                                 document.getElementById('lat').textContent = lat;
-                                document.getElementById('lng').textContent = lng;
+                               	document.getElementById('lng').textContent = lng;
                                 document.getElementById('acc').textContent = accuracy;
                                 document.getElementById('coords').style.display = 'block';
                                 
@@ -445,7 +445,7 @@ def request_geolocation(value):
             )
             
             # Check URL parameters
-            params = st.experimental_get_query_params()
+            params = st.query_params
             if 'save_location' in params and params.get('save_location', [''])[0] == 'true':
                 try:
                     lat = float(params.get('lat', ['0'])[0])
@@ -461,7 +461,7 @@ def request_geolocation(value):
                             # Clean URL params
                             clean_params = {k: v for k, v in params.items() 
                                            if k not in ['save_location', 'lat', 'lng']}
-                            st.experimental_set_query_params(**clean_params)
+                            st.set_query_params(**clean_params)
                             
                             st.rerun()
                 except Exception as e:
@@ -505,7 +505,7 @@ def show_camera_sidebar(value):
 # Check URL parameters for location data
 def check_location_params():
     # Get URL parameters
-    params = st.experimental_get_query_params()
+    params = st.query_params
     
     # Check if location was found and should be saved
     if 'save_location' in params and params.get('save_location', [''])[0] == 'true':
@@ -527,7 +527,7 @@ def check_location_params():
                         # Clean up URL parameters
                         clean_params = {k: v for k, v in params.items() 
                                       if k not in ['save_location', 'lat', 'lng']}
-                        st.experimental_set_query_params(**clean_params)
+                        st.set_query_params(**clean_params)
                         
                         return True
             except Exception as e:
