@@ -272,7 +272,7 @@ def filter_values(values, search_term):
             filtered.append(v)
     return filtered
 
-# Simplified geolocation function
+# FIXED: Simplified geolocation function
 def get_and_save_location(value):
     # If we haven't already requested location for this value
     if value not in st.session_state.location_requested:
@@ -288,23 +288,16 @@ def get_and_save_location(value):
                 # Use streamlit-js-eval to get location data
                 location_data = get_geolocation()
                 
-                if location_data is None:
+                # Fixed: Better type checking for location_data
+                if location_data is None or not isinstance(location_data, dict):
                     # User may not have responded to permission prompt yet
                     st.warning("Waiting for location permission... If no prompt appears, please check your browser settings.")
                     
-                    # Insert some JavaScript to help users understand what's happening
                     st.components.v1.html("""
                     <script>
                     // Check if geolocation is supported
                     if (navigator.geolocation) {
                         document.write("<p>Please allow location access when prompted by your browser.</p>");
-                        
-                        // Test if permissions might be denied
-                        navigator.permissions.query({name:'geolocation'}).then(function(result) {
-                            if (result.state === 'denied') {
-                                document.write("<p style='color:red;'>Location access appears to be blocked. Please check your browser settings and reload this page.</p>");
-                            }
-                        });
                     } else {
                         document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
                     }
@@ -320,7 +313,7 @@ def get_and_save_location(value):
                         if st.button("Cancel", key=f"cancel_loc_{value}"):
                             st.session_state.location_requested[value] = False
                             st.rerun()
-                else:
+                elif isinstance(location_data, dict) and 'coords' in location_data:
                     # We have the location data!
                     coords = location_data['coords']
                     latitude = coords['latitude']
@@ -334,16 +327,18 @@ def get_and_save_location(value):
                         return True
                     else:
                         st.error("Failed to save location data")
+                else:
+                    st.error("Unexpected response from geolocation service.")
         except Exception as e:
-            st.error(f"Error getting location: {e}")
+            st.error(f"Error getting location: {str(e)}")
         
         # Manual entry as fallback
-        st.write("If automatic location detection fails, enter coordinates manually:")
+        st.write("Enter coordinates manually:")
         col1, col2 = st.columns(2)
         with col1:
-            man_lat = st.number_input("Latitude", key=f"manlat_{value}")
+            man_lat = st.number_input("Latitude", value=0.0, format="%.7f", key=f"manlat_{value}")
         with col2:
-            man_lng = st.number_input("Longitude", key=f"manlng_{value}")
+            man_lng = st.number_input("Longitude", value=0.0, format="%.7f", key=f"manlng_{value}")
         
         col1, col2 = st.columns(2)
         with col1:
