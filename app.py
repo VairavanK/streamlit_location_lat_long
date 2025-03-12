@@ -13,7 +13,7 @@ if 'longitude' not in st.session_state:
 if 'location_retrieved' not in st.session_state:
     st.session_state.location_retrieved = False
 
-# JavaScript to get location and store it in session state using streamlit-js-eval
+# JavaScript to get location and store it in session state
 location_js = """
 <script>
 document.getElementById('get_location_button').addEventListener('click', function() {
@@ -64,14 +64,16 @@ html_form = f"""
 st.components.v1.html(html_form, height=200)
 
 # Check for query parameters from the form submission
-query_params = st.experimental_get_query_params()
+# Using st.query_params instead of deprecated st.experimental_get_query_params
+query_params = st.query_params
 if "lat" in query_params and "lng" in query_params:
     try:
-        st.session_state.latitude = float(query_params["lat"][0])
-        st.session_state.longitude = float(query_params["lng"][0])
+        st.session_state.latitude = float(query_params["lat"])
+        st.session_state.longitude = float(query_params["lng"])
         st.session_state.location_retrieved = True
         # Clear the query parameters to avoid reloading issues
-        st.experimental_set_query_params()
+        # Using the non-deprecated method to set query params
+        st.query_params.clear()
     except ValueError:
         st.error("Invalid coordinates received")
 
