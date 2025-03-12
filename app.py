@@ -1,5 +1,3 @@
-# Modified app.py with standard camera input but better saving logic
-
 import streamlit as st
 import pandas as pd
 import os
@@ -67,25 +65,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Create directories for storing data
+# Create directory for storing session data if it doesn't exist
 try:
     UPLOAD_FOLDER = "uploaded_files"
-    IMAGE_FOLDER = "captured_images"
-    
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
-    if not os.path.exists(IMAGE_FOLDER):
-        os.makedirs(IMAGE_FOLDER)
 except PermissionError:
     # Fall back to temp directory if permission issues
     import tempfile
     temp_dir = tempfile.gettempdir()
     UPLOAD_FOLDER = os.path.join(temp_dir, "uploaded_files")
-    IMAGE_FOLDER = os.path.join(temp_dir, "captured_images")
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
-    if not os.path.exists(IMAGE_FOLDER):
-        os.makedirs(IMAGE_FOLDER)
 
 # Session state initialization
 if 'data' not in st.session_state:
@@ -100,6 +91,28 @@ if 'location_column' not in st.session_state:
     st.session_state.location_column = None
 if 'image_column' not in st.session_state:
     st.session_state.image_column = None
+
+# Function to compress and encode image to base64
+def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
+    try:
+        # Open the image
+        img = Image.open(BytesIO(image_data))
+        
+        # Resize if larger than max_size
+        if img.width > max_size[0] or img.height > max_size[1]:
+            img.thumbnail(max_size, Image.LANCZOS)
+        
+        # Save to BytesIO with compression
+        output = BytesIO()
+        img.save(output, format='JPEG', quality=quality)
+        output.seek(0)
+        
+        # Encode to base64
+        encoded = base64.b64encode(output.getvalue()).decode('utf-8')
+        return f"data:image/jpeg;base64,{encoded}"
+    except Exception as e:
+        st.error(f"Error compressing image: {e}")
+        return None
 
 # Function to save session data to disk
 def save_session_data():
@@ -140,31 +153,38 @@ def save_location(value, lat, lng):
         st.success(f"Location saved for {value}: {lat}, {lng}")
         st.rerun()
 
-# Save image data
+# Save image data as base64 encoded string
 def save_image(value, image_data):
     if st.session_state.image_column is None:
         st.session_state.image_column = f"{st.session_state.selected_column}_image"
         if st.session_state.image_column not in st.session_state.data.columns:
             st.session_state.data[st.session_state.image_column] = None
     
-    # Save the image to the file system
-    image_filename = f"{st.session_state.session_id}_{value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-    image_path = os.path.join(IMAGE_FOLDER, image_filename)
-    
     try:
-        with open(image_path, "wb") as f:
-            f.write(image_data)
+        # Compress and encode the image
+        base64_image = compress_and_encode_image(image_data)
         
-        # Find the row index for the value
-        row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index
-        if not row_idx.empty:
-            st.session_state.data.loc[row_idx, st.session_state.image_column] = image_path
-            st.session_state.progress[value]['image'] = True
-            save_session_data()
-            st.success(f"Image saved for {value}")
-            st.rerun()
+        if base64_image:
+            # Find the row index for the value
+            row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index
+            if not row_idx.empty:
+                # Store base64 image directly in the dataframe
+                st.session_state.data.loc[row_idx, st.session_state.image_column] = base64_image
+                st.session_state.progress[value]['image'] = True
+                save_session_data()
+                st.success(f"Image saved for {value}")
+                st.rerun()
+        else:
+            st.error("Failed to process image")
     except Exception as e:
         st.error(f"Error saving image: {e}")
+
+# Display image from base64
+def display_image_from_base64(base64_string, width=200):
+    if base64_string and isinstance(base64_string, str) and base64_string.startswith('data:image'):
+        st.markdown(f'<img src="{base64_string}" width="{width}">', unsafe_allow_html=True)
+    else:
+        st.write("No image available")
 
 # Main app layout
 st.title("Data Enrichment with Location and Images")
@@ -287,18 +307,11 @@ if st.session_state.data is not None:
                                 if img_file is not None:
                                     # Make the image save process more robust
                                     try:
-                                        # Debug information
-                                        st.write(f"Image captured, processing...")
-                                        
                                         # Get the image data
                                         image_data = img_file.getvalue()
                                         
-                                        # Save image
+                                        # Save image as base64
                                         save_image(value, image_data)
-                                        st.success(f"Image saved for {value}")
-                                        
-                                        # Force a refresh to update the status
-                                        st.rerun()
                                     except Exception as e:
                                         st.error(f"Error processing image: {e}")
             else:
@@ -325,9 +338,8 @@ if st.session_state.data is not None:
                             row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
                             img_col = st.session_state.image_column
                             if img_col and img_col in st.session_state.data.columns:
-                                img_path = st.session_state.data.loc[row_idx, img_col]
-                                if img_path and os.path.exists(img_path):
-                                    st.image(Image.open(img_path), width=200)
+                                base64_image = st.session_state.data.loc[row_idx, img_col]
+                                display_image_from_base64(base64_image)
             else:
                 st.info("No completed values yet!")
                 
@@ -374,7 +386,6 @@ if st.session_state.data is not None:
                             img_file = st.camera_input(f"", key=f"all_cam_{value}")
                             if img_file is not None:
                                 try:
-                                    st.write(f"Image captured, processing...")
                                     image_data = img_file.getvalue()
                                     save_image(value, image_data)
                                 except Exception as e:
@@ -383,9 +394,8 @@ if st.session_state.data is not None:
                             row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
                             img_col = st.session_state.image_column
                             if img_col and img_col in st.session_state.data.columns:
-                                img_path = st.session_state.data.loc[row_idx, img_col]
-                                if img_path and os.path.exists(img_path):
-                                    st.image(Image.open(img_path), width=200)
+                                base64_image = st.session_state.data.loc[row_idx, img_col]
+                                display_image_from_base64(base64_image)
         
         # Download section
         st.write("## Download Enriched Data")
