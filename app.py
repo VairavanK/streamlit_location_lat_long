@@ -101,8 +101,16 @@ def filter_values(values, search_term):
     search_term = str(search_term).lower()
     return [v for v in values if search_term in str(v).lower()]
 
+# Initialize progress for a value if not already done
+def ensure_progress_initialized(value):
+    if value not in st.session_state.progress:
+        st.session_state.progress[value] = {'location': False, 'image': False}
+
 # Combined function to save data (location or image)
 def save_data(value, data_type, data):
+    # Make sure progress is initialized
+    ensure_progress_initialized(value)
+    
     # Initialize column if needed
     column_name = f"{st.session_state.selected_column}_{data_type}"
     if column_name not in st.session_state.data.columns:
@@ -119,15 +127,18 @@ def save_data(value, data_type, data):
     if not row_idx.empty:
         st.session_state.data.loc[row_idx, column_name] = data
         
-        # Update progress tracking
-        if value not in st.session_state.progress:
-            st.session_state.progress[value] = {'location': False, 'image': False}
+        # Update progress tracking - mark as completed
         st.session_state.progress[value][data_type] = True
+        st.success(f"{data_type.capitalize()} saved successfully!")
         return True
+    
+    st.error(f"Failed to find row for value: {value}")
     return False
 
 # Function to handle location capture
 def capture_location(value):
+    ensure_progress_initialized(value)
+    
     try:
         with st.spinner("Getting your location..."):
             location_data = get_geolocation()
@@ -145,19 +156,16 @@ def capture_location(value):
                 </script>
                 """, height=80)
                 
-                if st.button("I've granted permission - refresh", key=f"refresh_{value}"):
-                    st.rerun()
+                return False
+                
             elif isinstance(location_data, dict) and 'coords' in location_data:
                 coords = location_data['coords']
                 latitude = coords['latitude']
                 longitude = coords['longitude']
                 
                 # Save location data
-                if save_data(value, "location", f"{latitude}, {longitude}"):
-                    st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
-                    return True
-                else:
-                    st.error("Failed to save location data")
+                location_str = f"{latitude}, {longitude}"
+                return save_data(value, "location", location_str)
     except Exception as e:
         st.error(f"Error getting location: {str(e)}")
     
@@ -165,6 +173,8 @@ def capture_location(value):
 
 # Function to handle image capture
 def capture_image(value):
+    ensure_progress_initialized(value)
+    
     st.write(f"Take Photo for {value}")
     photo = st.camera_input("Camera", key=f"cam_{value}")
     
@@ -173,11 +183,10 @@ def capture_image(value):
             # Compress and encode the image
             base64_image = compress_and_encode_image(photo.getvalue())
             
-            if base64_image and save_data(value, "image", base64_image):
-                st.success("Photo saved successfully!")
-                return True
+            if base64_image:
+                return save_data(value, "image", base64_image)
             else:
-                st.error("Failed to process or save image")
+                st.error("Failed to process image")
         except Exception as e:
             st.error(f"Error saving photo: {e}")
     
@@ -208,6 +217,12 @@ def main():
             
             if st.button("Confirm Column"):
                 st.session_state.selected_column = selected_column
+                
+                # Initialize progress tracking for each value
+                unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique().tolist()
+                for value in unique_values:
+                    ensure_progress_initialized(value)
+                
                 st.rerun()
         
         # Step 3: Enrich each value
@@ -253,6 +268,7 @@ def main():
                 in_progress_values = get_in_progress_values()
                 if in_progress_values:
                     for value in in_progress_values:
+                        ensure_progress_initialized(value)
                         with st.expander(f"{value}"):
                             col1, col2 = st.columns(2)
                             
@@ -272,9 +288,8 @@ def main():
                                 
                                 # Only show camera button if image not captured yet
                                 if not st.session_state.progress.get(value, {}).get('image', False):
-                                    if st.button(f"📸 Take Photo", key=f"img_{value}"):
-                                        if capture_image(value):
-                                            st.rerun()
+                                    if capture_image(value):
+                                        st.rerun()
                 else:
                     if st.session_state.search_term:
                         st.info(f"No in-progress values match your search: '{st.session_state.search_term}'")
@@ -286,6 +301,7 @@ def main():
                 completed_values = get_completed_values()
                 if completed_values:
                     for value in completed_values:
+                        ensure_progress_initialized(value)
                         with st.expander(f"{value} ✅"):
                             col1, col2 = st.columns(2)
                             
@@ -314,6 +330,7 @@ def main():
             with all_tab:
                 if len(filtered_values) > 0:
                     for value in filtered_values:
+                        ensure_progress_initialized(value)
                         location_done = st.session_state.progress.get(value, {}).get('location', False)
                         image_done = st.session_state.progress.get(value, {}).get('image', False)
                         status = "✅" if location_done and image_done else "🔄"
@@ -341,9 +358,8 @@ def main():
                                 st.write(f"Image: {img_status}")
                                 
                                 if not image_done:
-                                    if st.button(f"📸 Take Photo", key=f"all_img_{value}"):
-                                        if capture_image(value):
-                                            st.rerun()
+                                    if capture_image(value):
+                                        st.rerun()
                                 else:
                                     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                                     img_col = st.session_state.image_column
