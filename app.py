@@ -446,4 +446,62 @@ def main():
                             col1, col2 = st.columns(2)
                             
                             with col1:
-                                loc_status = "✅" if locati
+                                loc_status = "✅" if location_done else "❌"
+                                st.write(f"Location: {loc_status}")
+                                
+                                if not location_done:
+                                    # Use a different prefix for all_tab to create unique keys
+                                    if get_and_save_location(value, prefix="all"):
+                                        st.rerun()
+                                else:
+                                    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
+                                    loc_col = st.session_state.location_column
+                                    if loc_col and loc_col in st.session_state.data.columns:
+                                        loc_data = st.session_state.data.loc[row_idx, loc_col]
+                                        st.write(f"Saved location: {loc_data}")
+                            
+                            with col2:
+                                img_status = "✅" if image_done else "❌"
+                                st.write(f"Image: {img_status}")
+                                
+                                if not image_done:
+                                    if st.button(f"📸 Take Photo for {value}", key=f"all_activate_{value}"):
+                                        st.session_state.camera_sidebar_active = True
+                                        st.session_state.camera_value = value
+                                        st.rerun()
+                                else:
+                                    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
+                                    img_col = st.session_state.image_column
+                                    if img_col and img_col in st.session_state.data.columns:
+                                        base64_image = st.session_state.data.loc[row_idx, img_col]
+                                        display_image_from_base64(base64_image)
+                else:
+                    st.info(f"No values match your search: '{st.session_state.search_term}'")
+            
+            # Display progress stats
+            total = len(unique_values)
+            completed_count = len([v for v in unique_values if (
+                st.session_state.progress.get(v, {}).get('location', False) and 
+                st.session_state.progress.get(v, {}).get('image', False)
+            )])
+            
+            progress_pct = int(completed_count/total*100) if total else 0
+            st.write(f"## Progress: {completed_count}/{total} values completed ({progress_pct}%)")
+            
+            # Download section
+            st.write("## Download Enriched Data")
+            st.write("When you are finished, you can download the enriched data.")
+            
+            if st.button("Prepare Download"):
+                st.markdown(get_csv_download_link(st.session_state.data), unsafe_allow_html=True)
+                
+            # Option to start over
+            if st.button("Start Over (Clear Session)"):
+                # Clear the session state
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.rerun()
+
+# Run the app
+if __name__ == "__main__":
+    main()
