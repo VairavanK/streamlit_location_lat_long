@@ -6,6 +6,7 @@ from datetime import datetime
 from io import BytesIO
 import uuid
 from PIL import Image
+import streamlit.components.v1 as components
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
@@ -50,18 +51,6 @@ st.markdown("""
         cursor: pointer;
         text-decoration: none;
     }
-    
-    /* Improve camera UI */
-    .stCamera > button {
-        background-color: #4CAF50 !important;
-        color: white !important;
-        padding: 10px 20px !important;
-        font-size: 16px !important;
-        border-radius: 5px !important;
-        margin-top: 10px !important;
-        width: 100% !important;
-        border: none !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,6 +80,8 @@ if 'location_column' not in st.session_state:
     st.session_state.location_column = None
 if 'image_column' not in st.session_state:
     st.session_state.image_column = None
+if 'camera_active' not in st.session_state:
+    st.session_state.camera_active = {}
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -171,6 +162,8 @@ def save_image(value, image_data):
                 # Store base64 image directly in the dataframe
                 st.session_state.data.loc[row_idx, st.session_state.image_column] = base64_image
                 st.session_state.progress[value]['image'] = True
+                # Turn off camera after capture
+                st.session_state.camera_active[value] = False
                 save_session_data()
                 st.success(f"Image saved for {value}")
                 st.rerun()
@@ -179,18 +172,213 @@ def save_image(value, image_data):
     except Exception as e:
         st.error(f"Error saving image: {e}")
 
+# Custom camera component with front/back switch
+def custom_camera_input(value, key):
+    camera_key = f"camera_{key}"
+    component_key = f"html_{key}"
+    
+    # Only display camera if it's active for this value
+    if st.session_state.camera_active.get(value, False):
+        # Use a custom HTML component for camera with front/back toggle
+        component_height = 500
+        camera_html = components.html(
+            f"""
+            <div style="display: flex; flex-direction: column; align-items: center; font-family: sans-serif;">
+                <h3>Take a photo for: {value}</h3>
+                <video id="video_{camera_key}" width="100%" autoplay style="margin-bottom: 10px; border-radius: 8px;"></video>
+                <div style="display: flex; justify-content: center; width: 100%; margin: 10px 0;">
+                    <button id="switch_{camera_key}" style="padding: 10px; background: #9C27B0; color: white; 
+                        border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                        <span>📷</span> Switch Camera
+                    </button>
+                    <button id="capture_{camera_key}" style="padding: 10px; background: #4CAF50; color: white; 
+                        border: none; border-radius: 5px; cursor: pointer;">
+                        <span>📸</span> Capture
+                    </button>
+                </div>
+                <button id="cancel_{camera_key}" style="padding: 10px; background: #F44336; color: white; 
+                    border: none; border-radius: 5px; cursor: pointer; width: 100%; margin-top: 10px;">
+                    Cancel
+                </button>
+                <canvas id="canvas_{camera_key}" style="display:none;"></canvas>
+                <div id="result_{camera_key}" style="width: 100%; margin-top: 15px; text-align: center; display: none;">
+                    <img id="photo_{camera_key}" style="max-width: 100%; border-radius: 8px;" />
+                    <div style="margin-top: 10px;">
+                        <button id="save_{camera_key}" style="padding: 10px; background: #4CAF50; color: white; 
+                            border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                            Save Photo
+                        </button>
+                        <button id="retake_{camera_key}" style="padding: 10px; background: #FF9800; color: white; 
+                            border: none; border-radius: 5px; cursor: pointer;">
+                            Retake
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <script>
+                const video = document.getElementById('video_{camera_key}');
+                const canvas = document.getElementById('canvas_{camera_key}');
+                const photo = document.getElementById('photo_{camera_key}');
+                const captureButton = document.getElementById('capture_{camera_key}');
+                const switchButton = document.getElementById('switch_{camera_key}');
+                const cancelButton = document.getElementById('cancel_{camera_key}');
+                const resultDiv = document.getElementById('result_{camera_key}');
+                const saveButton = document.getElementById('save_{camera_key}');
+                const retakeButton = document.getElementById('retake_{camera_key}');
+                
+                // Track which camera is being used (front or back)
+                let useFrontCamera = false;
+                let stream = null;
+                
+                // Function to start camera with specified facing mode
+                async function startCamera() {{
+                    // Stop any existing stream
+                    if (stream) {{
+                        stream.getTracks().forEach(track => track.stop());
+                    }}
+                    
+                    // Set camera constraints - default to back camera first
+                    const constraints = {{
+                        video: {{
+                            facingMode: useFrontCamera ? "user" : "environment"
+                        }}
+                    }};
+                    
+                    try {{
+                        stream = await navigator.mediaDevices.getUserMedia(constraints);
+                        video.srcObject = stream;
+                    }} catch (err) {{
+                        console.error('Error accessing camera: ', err);
+                        
+                        // Try the other camera as fallback
+                        try {{
+                            useFrontCamera = !useFrontCamera;
+                            const fallbackConstraints = {{
+                                video: {{
+                                    facingMode: useFrontCamera ? "user" : "environment"
+                                }}
+                            }};
+                            stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                            video.srcObject = stream;
+                        }} catch (fallbackErr) {{
+                            console.error('Error accessing fallback camera too: ', fallbackErr);
+                            alert('Unable to access camera. Please check camera permissions and try again.');
+                        }}
+                    }}
+                }}
+                
+                // Switch camera button
+                switchButton.addEventListener('click', () => {{
+                    useFrontCamera = !useFrontCamera;
+                    startCamera();
+                }});
+                
+                // Capture button
+                captureButton.addEventListener('click', () => {{
+                    // Set canvas dimensions to match video
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    
+                    // Draw the video frame to the canvas
+                    const context = canvas.getContext('2d');
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    // Show preview
+                    const imageData = canvas.toDataURL('image/jpeg');
+                    photo.src = imageData;
+                    
+                    // Hide video controls, show result preview
+                    video.style.display = 'none';
+                    captureButton.style.display = 'none';
+                    switchButton.style.display = 'none';
+                    resultDiv.style.display = 'block';
+                }});
+                
+                // Save image
+                saveButton.addEventListener('click', () => {{
+                    const imageData = photo.src.split(',')[1];  // Remove data URL prefix
+                    const data = {{
+                        value: "{value}",
+                        imageData: imageData
+                    }};
+                    
+                    // Stop camera stream
+                    if (stream) {{
+                        stream.getTracks().forEach(track => track.stop());
+                    }}
+                    
+                    // Send to Streamlit
+                    window.parent.postMessage({{
+                        type: "streamlit:setComponentValue",
+                        value: data
+                    }}, "*");
+                }});
+                
+                // Retake photo
+                retakeButton.addEventListener('click', () => {{
+                    // Reset UI
+                    resultDiv.style.display = 'none';
+                    video.style.display = 'block';
+                    captureButton.style.display = 'inline-block';
+                    switchButton.style.display = 'inline-block';
+                }});
+                
+                // Cancel button
+                cancelButton.addEventListener('click', () => {{
+                    // Stop camera
+                    if (stream) {{
+                        stream.getTracks().forEach(track => track.stop());
+                    }}
+                    
+                    // Tell Streamlit to close camera
+                    window.parent.postMessage({{
+                        type: "streamlit:setComponentValue",
+                        value: {{ value: "{value}", cancelled: true }}
+                    }}, "*");
+                }});
+                
+                // Start camera on load
+                startCamera();
+            </script>
+            """,
+            height=component_height,
+        )
+        
+        # Check if we got data back from component
+        if camera_key in st.session_state:
+            data = st.session_state[camera_key]
+            
+            # Handle cancel action
+            if isinstance(data, dict) and data.get('cancelled', False):
+                st.session_state.camera_active[value] = False
+                st.rerun()
+                
+            # Handle image data
+            if isinstance(data, dict) and 'imageData' in data:
+                # Convert base64 to binary
+                image_bytes = base64.b64decode(data['imageData'])
+                save_image(value, image_bytes)
+                st.session_state.camera_active[value] = False
+                return True
+        
+        return False
+    
+    # Show a button to activate the camera
+    if st.button(f"📸 Take Photo for {value}", key=f"activate_{key}"):
+        st.session_state.camera_active[value] = True
+        st.rerun()
+        
+    return False
+
 # Display image from base64
 def display_image_from_base64(base64_string, width=200):
     if base64_string and isinstance(base64_string, str) and base64_string.startswith('data:image'):
-        st.markdown(f'<img src="{base64_string}" width="{width}">', unsafe_allow_html=True)
+        st.markdown(f'<img src="{base64_string}" width="{width}" style="border-radius: 5px;">', unsafe_allow_html=True)
     else:
         st.write("No image available")
 
 # Main app layout
 st.title("Data Enrichment with Location and Images")
-
-# Camera instructions - make this prominent
-st.info("📱 **Mobile users**: Tap the camera switch icon during capture to use the back camera.")
 
 # Step 1: Upload CSV file or recover session
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
@@ -223,6 +411,8 @@ if st.session_state.data is not None:
             for value in st.session_state.data[st.session_state.selected_column].unique():
                 if value not in st.session_state.progress:
                     st.session_state.progress[value] = {'location': False, 'image': False}
+                if value not in st.session_state.camera_active:
+                    st.session_state.camera_active[value] = False
             
             save_session_data()
             st.rerun()
@@ -296,24 +486,7 @@ if st.session_state.data is not None:
                             
                             # Only show camera button if image not captured yet
                             if not st.session_state.progress.get(value, {}).get('image', False):
-                                # Add a camera button with clear styling
-                                st.markdown(
-                                    f'<div class="big-camera-button">Take Photo for {value}</div>', 
-                                    unsafe_allow_html=True
-                                )
-                                
-                                # Standard camera input
-                                img_file = st.camera_input(f"", key=f"cam_{value}")
-                                if img_file is not None:
-                                    # Make the image save process more robust
-                                    try:
-                                        # Get the image data
-                                        image_data = img_file.getvalue()
-                                        
-                                        # Save image as base64
-                                        save_image(value, image_data)
-                                    except Exception as e:
-                                        st.error(f"Error processing image: {e}")
+                                custom_camera_input(value, f"cam_{value}")
             else:
                 st.info("No values in progress - all are completed!")
                 
@@ -376,20 +549,7 @@ if st.session_state.data is not None:
                         st.write(f"Image: {img_status}")
                         
                         if not image_done:
-                            # Add a camera button with clear styling
-                            st.markdown(
-                                f'<div class="big-camera-button">Take Photo for {value}</div>', 
-                                unsafe_allow_html=True
-                            )
-                            
-                            # Standard camera input
-                            img_file = st.camera_input(f"", key=f"all_cam_{value}")
-                            if img_file is not None:
-                                try:
-                                    image_data = img_file.getvalue()
-                                    save_image(value, image_data)
-                                except Exception as e:
-                                    st.error(f"Error processing image: {e}")
+                            custom_camera_input(value, f"all_cam_{value}")
                         else:
                             row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
                             img_col = st.session_state.image_column
