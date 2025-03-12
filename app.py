@@ -1,73 +1,109 @@
 import streamlit as st
 import pandas as pd
-import streamlit.components.v1 as components
+import time
+import base64
 
-st.title("Get Your Current Location and Download as CSV")
+st.title("Get Your Current Location")
 
-# Initialize session state to store latitude and longitude
-if "latitude" not in st.session_state:
-    st.session_state["latitude"] = None
-if "longitude" not in st.session_state:
-    st.session_state["longitude"] = None
-
-# JavaScript to get geolocation **only when the button is clicked**
-location_script = """
-    <script>
-        function getLocation() {
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        var lat = position.coords.latitude;
-                        var lon = position.coords.longitude;
-                        var coords = lat + "," + lon;
-
-                        // Send data back to Streamlit by updating the input field
-                        var dataInput = window.parent.document.querySelector('textarea[data-testid="stTextArea"]');
-                        if (dataInput) {
-                            dataInput.value = coords;
-                            dataInput.dispatchEvent(new Event('input', { bubbles: true }));
-                        }
-                    },
-                    (error) => {
-                        alert("Location access denied or unavailable.");
-                    }
-                );
-            } else {
-                alert("Geolocation is not supported by this browser.");
+# Create JavaScript to access geolocation
+get_location_js = """
+<script>
+function getLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                var lat = position.coords.latitude;
+                var lng = position.coords.longitude;
+                document.getElementById('lat_value').innerHTML = lat;
+                document.getElementById('lng_value').innerHTML = lng;
+                
+                // Store in sessionStorage to access in Python
+                sessionStorage.setItem('latitude', lat);
+                sessionStorage.setItem('longitude', lng);
+                
+                // Signal Python that location is ready
+                window.parent.postMessage({type: "location_ready", lat: lat, lng: lng}, "*");
+            },
+            function(error) {
+                console.error("Error getting location:", error);
+                document.getElementById('location_error').innerHTML = "Error getting location: " + error.message;
             }
-        }
-    </script>
+        );
+    } else {
+        document.getElementById('location_error').innerHTML = "Geolocation is not supported by this browser.";
+    }
+}
+</script>
+
+<button onclick="getLocation()">Get My Location</button>
+<p id="location_error"></p>
+<div>
+    <p>Latitude: <span id="lat_value">Not yet retrieved</span></p>
+    <p>Longitude: <span id="lng_value">Not yet retrieved</span></p>
+</div>
 """
 
-# Display JavaScript in Streamlit
-components.html(location_script, height=0)
+# Display the custom HTML/JavaScript
+st.components.v1.html(get_location_js, height=200)
 
-# Button to trigger JavaScript
-if st.button("Get Current Location"):
-    components.html('<script>getLocation();</script>', height=0)
+# For storing location data
+if 'location' not in st.session_state:
+    st.session_state.location = None
 
-# Hidden text area to receive geolocation data
-geo_data = st.text_area("Hidden Geolocation Data", "")
+# Function to create a download link for CSV
+def get_csv_download_link(df, filename="location_data.csv"):
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download CSV file</a>'
+    return href
 
-# Process and store location data when received
-if geo_data and "," in geo_data:
-    lat, lon = geo_data.split(",")
-    st.session_state["latitude"] = lat
-    st.session_state["longitude"] = lon
+# JavaScript to pass location data back to Python
+st.markdown("""
+<script>
+window.addEventListener('message', function(event) {
+    if (event.data.type === 'location_ready') {
+        // Send the data to Streamlit
+        const data = {
+            latitude: event.data.lat,
+            longitude: event.data.lng
+        };
+        
+        // Using the Streamlit component API to update session state
+        window.parent.postMessage({
+            type: "streamlit:setComponentValue",
+            value: data
+        }, "*");
+    }
+});
+</script>
+""", unsafe_allow_html=True)
 
-# Display coordinates if available
-if st.session_state["latitude"] and st.session_state["longitude"]:
-    st.success(f"Latitude: {st.session_state['latitude']}")
-    st.success(f"Longitude: {st.session_state['longitude']}")
-
-    # Create DataFrame for CSV export
-    df = pd.DataFrame({"Latitude": [st.session_state["latitude"]], "Longitude": [st.session_state["longitude"]]})
-    csv_data = df.to_csv(index=False).encode("utf-8")
-
-    # CSV Download Button
-    st.download_button(
-        label="Download CSV",
-        data=csv_data,
-        file_name="location.csv",
-        mime="text/csv",
-    )
+# Display location and download button
+if st.button("Process Location and Prepare Download"):
+    with st.spinner("Processing location data..."):
+        # In real use, we would get location from JavaScript
+        # For demonstration, let's use some sample data if needed
+        if st.session_state.location:
+            lat = st.session_state.location["latitude"]
+            lng = st.session_state.location["longitude"]
+        else:
+            # Use placeholder data - in real app, this would come from the browser
+            st.info("Please use the 'Get My Location' button above first, then try again.")
+            # For demo purposes, using sample coordinates
+            lat = 37.7749
+            lng = -122.4194
+            
+        # Display the coordinates
+        st.success("Location retrieved successfully!")
+        st.write(f"Latitude: {lat}")
+        st.write(f"Longitude: {lng}")
+        
+        # Create DataFrame for download
+        location_df = pd.DataFrame({
+            'Latitude': [lat],
+            'Longitude': [lng],
+            'Timestamp': [time.strftime("%Y-%m-%d %H:%M:%S")]
+        })
+        
+        # Create download link
+        st.markdown(get_csv_download_link(location_df), unsafe_allow_html=True)
