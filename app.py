@@ -258,6 +258,7 @@ def custom_camera_input(value, key):
                     
                     // Start camera
                     async function startCamera() {
+                        // Stop any existing stream
                         if (stream) {
                             stream.getTracks().forEach(track => track.stop());
                         }
