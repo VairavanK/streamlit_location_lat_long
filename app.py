@@ -5,9 +5,9 @@ import pandas as pd
 st.title("Get Your Current Location and Download as CSV")
 
 # Read URL query parameters for latitude and longitude
-query_params = st.experimental_get_query_params()
-lat = query_params.get("lat", [None])[0]
-lon = query_params.get("lon", [None])[0]
+query_params = st.query_params
+lat = query_params.get("lat", None)
+lon = query_params.get("lon", None)
 
 if lat and lon:
     st.write("Your Coordinates:")
