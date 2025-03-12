@@ -495,7 +495,7 @@ def main():
                                     # Only show location button if location not captured yet
                                     if not st.session_state.progress.get(value, {}).get('location', False):
                                         if get_and_save_location(value):
-                                        st.rerun()
+                                            st.rerun()
                                 
                                 with col2:
                                     img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
