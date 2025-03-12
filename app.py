@@ -73,6 +73,14 @@ st.markdown("""
     [data-testid="stVerticalBlock"] iframe {
         min-height: 360px !important;
     }
+    
+    /* Preview image styling */
+    .preview-image {
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 5px;
+        background-color: #f8f9fa;
+    }
 </style>
 
 <script>
@@ -111,6 +119,8 @@ if 'active_capture_value' not in st.session_state:
     st.session_state.active_capture_value = None
 if 'location_requested' not in st.session_state:
     st.session_state.location_requested = {}
+if 'temp_photo' not in st.session_state:
+    st.session_state.temp_photo = None
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -313,47 +323,80 @@ def main():
                 # Simple instructions before camera
                 st.info("Position your item and tap directly on the camera view to capture")
                 
-                # Add some space around the camera component
-                st.markdown('<div style="padding:10px 0;"></div>', unsafe_allow_html=True)
+                # Create two columns for camera and preview
+                col1, col2 = st.columns(2)
                 
-                # Use custom component directly with minimal parameters
-                photo = back_camera_input("", key=f"cam_{value}")
+                with col1:
+                    # Camera column
+                    st.markdown("### Camera")
+                    # Add some space around the camera component
+                    st.markdown('<div style="padding:5px 0;"></div>', unsafe_allow_html=True)
+                    
+                    # Use custom component directly with minimal parameters
+                    photo = back_camera_input("", key=f"cam_{value}")
+                    
+                    # Add tap to capture text
+                    st.markdown('<div class="camera-prompt">👆 Tap to capture</div>', unsafe_allow_html=True)
+                    
+                    # Cancel button
+                    if st.button("❌ Cancel", key=f"cam_cancel_{value}"):
+                        st.session_state.active_capture_value = None
+                        st.session_state.temp_photo = None
+                        st.rerun()
                 
-                # Add tap to capture text
-                st.markdown('<div class="camera-prompt">👆 Tap on the camera to capture</div>', unsafe_allow_html=True)
-                
-                # Space before cancel button
-                st.write("")
-                
-                # Cancel button
-                if st.button("❌ Cancel Photo Capture", key=f"cam_cancel_{value}"):
-                    st.session_state.active_capture_value = None
-                    st.rerun()
-                
-                # Process the captured image
-                if photo is not None:
-                    try:
-                        # Get image data
-                        image_data = photo.getvalue()
-                        # Process and save the image
-                        if save_image(value, image_data):
-                            st.success("✅ Photo saved successfully!")
+                with col2:
+                    # Preview column
+                    st.markdown("### Preview")
+                    
+                    # Process the captured image immediately for preview
+                    if photo is not None:
+                        try:
+                            # Store the photo temporarily for preview
+                            st.session_state.temp_photo = photo.getvalue()
                             
-                            # Show the image that was captured
-                            st.write("Preview of captured image:")
-                            img = Image.open(BytesIO(image_data))
-                            st.image(img, width=300)
+                            # Display preview
+                            img = Image.open(BytesIO(st.session_state.temp_photo))
+                            st.image(img, use_column_width=True, caption="Current capture")
                             
-                            # Continue button
-                            if st.button("✅ Continue", key="continue_after_capture"):
-                                st.session_state.active_capture_value = None
+                            # Add save button
+                            if st.button("✅ Save & Continue", key="save_photo"):
+                                if save_image(value, st.session_state.temp_photo):
+                                    st.success("Photo saved successfully!")
+                                    st.session_state.active_capture_value = None
+                                    st.session_state.temp_photo = None
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to save photo. Please try again.")
+                            
+                            # Add retake button
+                            if st.button("🔄 Retake Photo", key="retake_photo"):
+                                st.session_state.temp_photo = None
                                 st.rerun()
-                        else:
-                            st.error("Failed to save photo. Please try again.")
-                    except Exception as e:
-                        st.error(f"Error saving photo: {e}")
-                        st.error("Please try taking another photo or cancel and try again.")
+                                
+                        except Exception as e:
+                            st.error(f"Error processing photo: {e}")
+                    elif st.session_state.temp_photo is not None:
+                        # Display previously captured photo
+                        img = Image.open(BytesIO(st.session_state.temp_photo))
+                        st.image(img, use_column_width=True, caption="Current capture")
                         
+                        # Add save button
+                        if st.button("✅ Save & Continue", key="save_photo_existing"):
+                            if save_image(value, st.session_state.temp_photo):
+                                st.success("Photo saved successfully!")
+                                st.session_state.active_capture_value = None
+                                st.session_state.temp_photo = None
+                                st.rerun()
+                            else:
+                                st.error("Failed to save photo. Please try again.")
+                        
+                        # Add retake button
+                        if st.button("🔄 Retake Photo", key="retake_photo_existing"):
+                            st.session_state.temp_photo = None
+                            st.rerun()
+                    else:
+                        st.write("No photo captured yet. Tap on the camera to take a picture.")
+                
                 # Early return if we're capturing an image
                 return
                 
@@ -419,6 +462,7 @@ def main():
                                 if not st.session_state.progress.get(value, {}).get('image', False):
                                     if st.button(f"📸 Take Photo", key=f"ip_activate_{value}"):
                                         st.session_state.active_capture_value = value
+                                        st.session_state.temp_photo = None
                                         st.rerun()
                 else:
                     if st.session_state.search_term:
@@ -488,6 +532,7 @@ def main():
                                 if not image_done:
                                     if st.button(f"📸 Take Photo", key=f"all_activate_{value}"):
                                         st.session_state.active_capture_value = value
+                                        st.session_state.temp_photo = None
                                         st.rerun()
                                 else:
                                     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
