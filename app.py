@@ -10,7 +10,7 @@ if "latitude" not in st.session_state:
 if "longitude" not in st.session_state:
     st.session_state["longitude"] = None
 
-# JavaScript to get user's geolocation and pass it to Streamlit
+# JavaScript to get location and update Streamlit's text area
 location_script = """
     <script>
         function getLocation() {
@@ -19,13 +19,10 @@ location_script = """
                     (position) => {
                         var lat = position.coords.latitude;
                         var lon = position.coords.longitude;
-
-                        // Send the data back to Streamlit using an iframe trick
-                        var streamlit_data = lat + "," + lon;
-                        var iframe = document.createElement("iframe");
-                        iframe.src = "https://localhost/?data=" + encodeURIComponent(streamlit_data);
-                        iframe.style.display = "none";
-                        document.body.appendChild(iframe);
+                        var coords = lat + "," + lon;
+                        // Update hidden text area
+                        document.getElementById("geo_data").value = coords;
+                        document.getElementById("geo_data").dispatchEvent(new Event("input", { bubbles: true }));
                     },
                     (error) => {
                         alert("Location access denied or unavailable.");
@@ -39,31 +36,31 @@ location_script = """
     <button onclick="getLocation()">Get Current Location</button>
 """
 
-# Render JavaScript inside Streamlit
+# Embed JavaScript inside Streamlit
 components.html(location_script, height=100)
 
-# Input field to receive location data from the frontend
-location_input = st.text_input("Location Data (Hidden)", "")
+# Hidden text area to capture JavaScript output
+geo_data = st.text_area("Hidden Geolocation Data", key="geo_data")
 
 # Process and store location data
-if location_input:
+if geo_data:
     try:
-        lat, lon = location_input.split(",")
+        lat, lon = geo_data.split(",")
         st.session_state["latitude"] = lat
         st.session_state["longitude"] = lon
     except:
         st.error("Invalid location data received.")
 
-# Display location if available
+# Display coordinates if available
 if st.session_state["latitude"] and st.session_state["longitude"]:
-    st.write(f"**Latitude:** {st.session_state['latitude']}")
-    st.write(f"**Longitude:** {st.session_state['longitude']}")
+    st.success(f"**Latitude:** {st.session_state['latitude']}")
+    st.success(f"**Longitude:** {st.session_state['longitude']}")
 
-    # Create DataFrame for CSV
+    # Create DataFrame and convert to CSV
     df = pd.DataFrame({"Latitude": [st.session_state["latitude"]], "Longitude": [st.session_state["longitude"]]})
     csv_data = df.to_csv(index=False).encode("utf-8")
 
-    # Download button for CSV
+    # CSV Download Button
     st.download_button(
         label="Download CSV",
         data=csv_data,
