@@ -69,8 +69,8 @@ st.markdown("""
         margin: 0 auto;
     }
     
-    /* Make camera modal-like instead of page-shifting */
-    .camera-overlay {
+    /* Camera modal styling */
+    .modal-overlay {
         position: fixed;
         top: 0;
         left: 0;
@@ -78,89 +78,55 @@ st.markdown("""
         height: 100%;
         background-color: rgba(0,0,0,0.8);
         z-index: 1000;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
         padding: 20px;
-    }
-    
-    .camera-content {
-        background: white;
-        border-radius: 10px;
-        padding: 15px;
-        width: 90%;
-        max-width: 500px;
-    }
-    
-    .camera-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-    }
-    
-    .camera-close {
-        cursor: pointer;
-        font-size: 24px;
     }
 </style>
 
 <script>
 // Force back camera selection for all camera inputs
-function setupBackCamera() {
-    // Find all video elements that get created by streamlit camera_input
-    const videoElements = document.querySelectorAll('.stCamera video');
-    videoElements.forEach(function(video) {
-        if (video && !video.dataset.cameraInitialized) {
-            // Get user media constraints for environment facing camera
-            const constraints = {
-                video: {
-                    facingMode: { exact: "environment" }
-                }
-            };
-            
-            // Stop any existing stream
-            if (video.srcObject) {
-                const tracks = video.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
-            }
-            
-            // Request camera with environment facing mode
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(function(stream) {
-                    video.srcObject = stream;
-                    video.dataset.cameraInitialized = 'true';
-                })
-                .catch(function(err) {
-                    // If environment camera fails, fall back to any camera
-                    console.log('Failed to get environment camera: ' + err);
-                    navigator.mediaDevices.getUserMedia({ video: true })
-                        .then(function(stream) {
-                            video.srcObject = stream;
-                            video.dataset.cameraInitialized = 'true';
-                        });
-                });
-        }
-    });
-}
-
-// Setup mutation observer to detect when camera is added to DOM
 document.addEventListener('DOMContentLoaded', function() {
-    // Setup observer to watch for camera elements being added
+    // Setup mutation observer to detect when camera is added
     const observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-            if (mutation.addedNodes.length) {
-                setupBackCamera();
+        // Check for video elements
+        const videoElements = document.querySelectorAll('.stCamera video');
+        videoElements.forEach(function(video) {
+            if (video && !video.hasAttribute('data-camera-setup')) {
+                // Stop any existing stream
+                if (video.srcObject) {
+                    const tracks = video.srcObject.getTracks();
+                    tracks.forEach(track => track.stop());
+                }
+                
+                // Try to get environment-facing camera
+                navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { exact: "environment" }
+                    }
+                }).then(function(stream) {
+                    video.srcObject = stream;
+                    video.setAttribute('data-camera-setup', 'true');
+                }).catch(function(err) {
+                    // Fallback to any camera if environment camera fails
+                    console.log('Falling back to any camera: ' + err);
+                    navigator.mediaDevices.getUserMedia({
+                        video: true
+                    }).then(function(stream) {
+                        video.srcObject = stream;
+                        video.setAttribute('data-camera-setup', 'true');
+                    });
+                });
             }
         });
     });
     
-    // Start observing document for camera elements
+    // Start observing
     observer.observe(document.body, { childList: true, subtree: true });
     
-    // Also try immediately in case camera is already in DOM
-    setTimeout(setupBackCamera, 1000);
+    // Try immediately and also after a short delay
+    setTimeout(function() {
+        observer.disconnect();
+        observer.observe(document.body, { childList: true, subtree: true });
+    }, 1000);
 });
 </script>
 """, unsafe_allow_html=True)
@@ -196,10 +162,12 @@ if 'search_term' not in st.session_state:
     st.session_state.search_term = ""
 if 'geolocation_data' not in st.session_state:
     st.session_state.geolocation_data = {}
-if 'show_camera_modal' not in st.session_state:
-    st.session_state.show_camera_modal = False
-if 'current_value_for_camera' not in st.session_state:
-    st.session_state.current_value_for_camera = None
+if 'pending_location' not in st.session_state:
+    st.session_state.pending_location = None
+if 'camera_sidebar_active' not in st.session_state:
+    st.session_state.camera_sidebar_active = False
+if 'camera_value' not in st.session_state:
+    st.session_state.camera_value = None
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -246,7 +214,7 @@ def get_csv_download_link(df):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="big-camera-button">Download Enriched CSV</a>'
     return href
 
-# Save location data - Fixed to ensure location gets properly saved
+# Save location data
 def save_location(value, lat, lng):
     if st.session_state.location_column is None:
         st.session_state.location_column = f"{st.session_state.selected_column}_location"
@@ -282,8 +250,8 @@ def save_image(value, image_data):
                 st.session_state.progress[value]['image'] = True
                 # Turn off camera after capture
                 st.session_state.camera_active[value] = False
-                st.session_state.show_camera_modal = False
-                st.session_state.current_value_for_camera = None
+                st.session_state.camera_sidebar_active = False
+                st.session_state.camera_value = None
                 save_session_data()
                 return True
         else:
@@ -312,58 +280,16 @@ def filter_values(values, search_term):
             filtered.append(v)
     return filtered
 
-# Camera modal component for a better UX
-def camera_modal(value):
-    # Create a container for the modal-like camera UI
-    st.markdown("""
-    <div class="camera-overlay">
-        <div class="camera-content">
-            <div class="camera-header">
-                <h3>Taking photo for: {}</h3>
-                <span class="camera-close" onclick="closeModal()">×</span>
-            </div>
-            <div id="camera-placeholder"></div>
-        </div>
-    </div>
+# Fixed geolocation component without using key parameter
+def request_geolocation(value):
+    # Create a unique ID for this geolocation request
+    loc_id = f"loc_{value}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     
-    <script>
-    function closeModal() {{
-        // Send a message to Streamlit to close the modal
-        window.parent.postMessage({{
-            type: "streamlit:setComponentValue",
-            value: "close_camera_modal"
-        }}, "*");
-    }}
-    </script>
-    """.format(value), unsafe_allow_html=True)
+    # Set up session state to track this location request
+    st.session_state.pending_location = {'value': value, 'id': loc_id, 'status': 'pending'}
     
-    # Place the camera in the placeholder
-    photo = st.camera_input("", key=f"modal_cam_{value}")
-    
-    # Add buttons
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", key=f"modal_cancel_{value}"):
-            st.session_state.show_camera_modal = False
-            st.session_state.current_value_for_camera = None
-            st.rerun()
-    
-    # Process the captured image
-    if photo is not None:
-        image_data = photo.getvalue()
-        if save_image(value, image_data):
-            st.success(f"Photo saved for {value}!")
-            st.session_state.show_camera_modal = False
-            st.session_state.current_value_for_camera = None
-            st.rerun()
-
-# Improved geolocation component with better Streamlit integration
-def geolocation_component(value):
-    # Create a unique key for this instance
-    component_key = f"geoloc_{value}_{uuid.uuid4()}"
-    
-    # Use an HTML component with proper Streamlit message passing
-    loc_data = components.html(
+    # HTML component without key parameter
+    components.html(
         f"""
         <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 10px;">
             <div id="status">Requesting your location...</div>
@@ -372,25 +298,30 @@ def geolocation_component(value):
                 <div><strong>Longitude:</strong> <span id="lng"></span></div>
                 <div><strong>Accuracy:</strong> <span id="acc"></span> meters</div>
             </div>
+            <button id="cancel-btn" style="margin-top: 10px; display: none;">Cancel</button>
         </div>
 
         <script>
-            // Function to update status
+            // Create a unique ID for this location request
+            const locId = "{loc_id}";
+            
+            // Function to update status message
             function updateStatus(message) {{
                 document.getElementById('status').innerHTML = message;
             }}
             
-            // Function to send data to Streamlit
-            function sendToStreamlit(data) {{
-                window.parent.postMessage({{
-                    type: "streamlit:setComponentValue",
-                    value: data
-                }}, "*");
+            // Function to set Streamlit session state
+            function setSessionState(key, value) {{
+                const event = new CustomEvent('streamlit:setSessionState', {{
+                    detail: {{ data: {{ [key]: value }} }}
+                }});
+                window.dispatchEvent(event);
             }}
             
             // Function to get location
             function getLocation() {{
                 updateStatus("<span style='color:blue;'>Requesting permission to access your location...</span>");
+                document.getElementById('cancel-btn').style.display = 'block';
                 
                 if (navigator.geolocation) {{
                     navigator.geolocation.getCurrentPosition(
@@ -406,17 +337,25 @@ def geolocation_component(value):
                             document.getElementById('acc').textContent = accuracy;
                             document.getElementById('coords').style.display = 'block';
                             
-                            // Display success
-                            updateStatus("<span style='color:green;'>Location found! Coordinates:</span>");
+                            // Update status
+                            updateStatus("<span style='color:green;'>Location found! Saving...</span>");
                             
-                            // Send to Streamlit with a slight delay to ensure UI updates first
+                            // Save location data in session state
+                            setSessionState('geolocation_data', {{
+                                value: "{value}",
+                                id: locId,
+                                lat: lat,
+                                lng: lng,
+                                accuracy: accuracy
+                            }});
+                            
+                            // Submit form to trigger rerun
                             setTimeout(function() {{
-                                sendToStreamlit({{
-                                    lat: lat,
-                                    lng: lng,
-                                    accuracy: accuracy,
-                                    status: 'success'
-                                }});
+                                const streamlitApp = window.parent.document;
+                                const buttons = streamlitApp.querySelectorAll('button[kind=primaryFormSubmit]');
+                                if (buttons.length) {{
+                                    buttons[0].click();
+                                }}
                             }}, 500);
                         }},
                         // Error callback
@@ -436,7 +375,7 @@ def geolocation_component(value):
                                     errorMsg = "An unknown location error occurred.";
                             }}
                             updateStatus(`<span style='color:red;'>Error: ${{errorMsg}}</span>`);
-                            sendToStreamlit({{ status: 'error', message: errorMsg }});
+                            setSessionState('pending_location', null);
                         }},
                         // Options
                         {{
@@ -446,109 +385,154 @@ def geolocation_component(value):
                         }}
                     );
                 }} else {{
-                    const errorMsg = "Geolocation is not supported by this browser.";
-                    updateStatus(`<span style='color:red;'>Error: ${{errorMsg}}</span>`);
-                    sendToStreamlit({{ status: 'error', message: errorMsg }});
+                    updateStatus("<span style='color:red;'>Geolocation is not supported by this browser.</span>");
+                    setSessionState('pending_location', null);
                 }}
             }}
+            
+            // Add event listener to cancel button
+            document.getElementById('cancel-btn').addEventListener('click', function() {{
+                setSessionState('pending_location', null);
+                // Submit form to trigger rerun
+                const streamlitApp = window.parent.document;
+                const buttons = streamlitApp.querySelectorAll('button[kind=primaryFormSubmit]');
+                if (buttons.length) {{
+                    buttons[0].click();
+                }}
+            }});
             
             // Start the location request immediately
             getLocation();
         </script>
         """,
-        height=150,
-        key=component_key
+        height=150
     )
     
-    # Handle the returned location data
-    if loc_data and isinstance(loc_data, dict) and 'status' in loc_data:
-        if loc_data['status'] == 'success' and 'lat' in loc_data and 'lng' in loc_data:
-            lat = loc_data['lat']
-            lng = loc_data['lng']
-            accuracy = loc_data.get('accuracy', 'unknown')
-            
-            # Save the location
-            if save_location(value, lat, lng):
-                st.success(f"Location saved for {value}: {lat}, {lng} (accuracy: {accuracy}m)")
-                return True
-        elif loc_data['status'] == 'error':
-            st.error(f"Error getting location: {loc_data.get('message', 'Unknown error')}")
-    
-    # Cancel button
+    # Add a cancel button in Streamlit
     if st.button("Cancel", key=f"cancel_geo_{value}"):
-        return True
-        
+        st.session_state.pending_location = None
+        st.rerun()
+    
+    # Check if we have geolocation data for this value
+    if 'geolocation_data' in st.session_state and isinstance(st.session_state.geolocation_data, dict):
+        geo_data = st.session_state.geolocation_data
+        if geo_data.get('id') == loc_id and geo_data.get('value') == value and 'lat' in geo_data and 'lng' in geo_data:
+            # Save the location
+            lat = geo_data['lat']
+            lng = geo_data['lng']
+            if save_location(value, lat, lng):
+                # Clear pending location and geolocation data
+                st.session_state.pending_location = None
+                st.session_state.geolocation_data = {}
+                st.success(f"Location saved for {value}: {lat}, {lng}")
+                return True
+    
     return False
 
-# Main app layout
-st.title("Data Enrichment with Location and Images")
-
-# Step 1: Upload CSV file or recover session
-uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
-
-if uploaded_file and st.session_state.data is None:
-    try:
-        st.session_state.data = pd.read_csv(uploaded_file)
-        save_session_data()
-        st.success("CSV file uploaded successfully!")
-    except Exception as e:
-        st.error(f"Error: {e}")
-elif not uploaded_file and st.session_state.data is None:
-    # Try to load from saved session
-    if load_session_data():
-        st.success("Recovered data from previous session!")
-
-# Step 2: Column selection
-if st.session_state.data is not None:
-    if st.session_state.selected_column is None:
-        st.write("Preview of your data:")
-        st.dataframe(st.session_state.data.head())
+# Sidebar camera implementation that doesn't navigate away from main page
+def show_camera_sidebar(value):
+    # Create a sidebar for the camera
+    with st.sidebar:
+        st.title(f"Take Photo for {value}")
         
-        columns = list(st.session_state.data.columns)
-        selected_column = st.selectbox("Select a column to enrich:", columns)
+        # Add camera input in the sidebar
+        photo = st.camera_input("", key=f"sidebar_cam_{value}")
         
-        if st.button("Confirm Column"):
-            st.session_state.selected_column = selected_column
-            
-            # Initialize progress tracking for each value
-            unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique()
-            
-            for value in unique_values:
-                if value not in st.session_state.progress:
-                    st.session_state.progress[value] = {'location': False, 'image': False}
-                if value not in st.session_state.camera_active:
-                    st.session_state.camera_active[value] = False
-            
-            save_session_data()
+        # Cancel button
+        if st.button("Cancel", key=f"sidebar_cancel_{value}"):
+            st.session_state.camera_sidebar_active = False
+            st.session_state.camera_value = None
             st.rerun()
-    
-    # Step 3: Enrich each value
-    if st.session_state.selected_column is not None:
-        main_container = st.container()
         
-        # Check if camera modal is active
-        if st.session_state.show_camera_modal and st.session_state.current_value_for_camera:
-            camera_modal(st.session_state.current_value_for_camera)
-        else:
-            # Main content
-            with main_container:
-                st.write(f"Enriching data for column: **{st.session_state.selected_column}**")
-                
-                # Convert to strings to avoid numpy array issues
-                unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique().tolist()
-                
-                # Search and filter functionality
-                search_term = st.text_input("🔍 Search values:", value=st.session_state.search_term)
-                if search_term != st.session_state.search_term:
-                    st.session_state.search_term = search_term
+        # Process the captured image
+        if photo is not None:
+            try:
+                # Get image data
+                image_data = photo.getvalue()
+                # Process and save the image
+                if save_image(value, image_data):
+                    st.success("Photo saved successfully!")
+                    # Turn off camera
+                    st.session_state.camera_sidebar_active = False
+                    st.session_state.camera_value = None
                     st.rerun()
-                    
-                # Filter values based on search
-                filtered_values = filter_values(unique_values, st.session_state.search_term)
+            except Exception as e:
+                st.error(f"Error saving photo: {e}")
+
+# Main app layout
+def main():
+    # Check if camera sidebar is active
+    if st.session_state.camera_sidebar_active and st.session_state.camera_value:
+        show_camera_sidebar(st.session_state.camera_value)
+    
+    # Main app content
+    st.title("Data Enrichment with Location and Images")
+    
+    # Step 1: Upload CSV file or recover session
+    uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+    
+    if uploaded_file and st.session_state.data is None:
+        try:
+            st.session_state.data = pd.read_csv(uploaded_file)
+            save_session_data()
+            st.success("CSV file uploaded successfully!")
+        except Exception as e:
+            st.error(f"Error: {e}")
+    elif not uploaded_file and st.session_state.data is None:
+        # Try to load from saved session
+        if load_session_data():
+            st.success("Recovered data from previous session!")
+    
+    # Step 2: Column selection
+    if st.session_state.data is not None:
+        if st.session_state.selected_column is None:
+            st.write("Preview of your data:")
+            st.dataframe(st.session_state.data.head())
+            
+            columns = list(st.session_state.data.columns)
+            selected_column = st.selectbox("Select a column to enrich:", columns)
+            
+            if st.button("Confirm Column"):
+                st.session_state.selected_column = selected_column
                 
-                if st.session_state.search_term and len(filtered_values) < len(unique_values):
-                    st.write(f"Showing {len(filtered_values)} of {len(unique_values)} values")
+                # Initialize progress tracking for each value
+                unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique()
                 
+                for value in unique_values:
+                    if value not in st.session_state.progress:
+                        st.session_state.progress[value] = {'location': False, 'image': False}
+                    if value not in st.session_state.camera_active:
+                        st.session_state.camera_active[value] = False
+                
+                save_session_data()
+                st.rerun()
+        
+        # Step 3: Enrich each value
+        if st.session_state.selected_column is not None:
+            st.write(f"Enriching data for column: **{st.session_state.selected_column}**")
+            
+            # Convert to strings to avoid numpy array issues
+            unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique().tolist()
+            
+            # Search and filter functionality
+            search_term = st.text_input("🔍 Search values:", value=st.session_state.search_term)
+            if search_term != st.session_state.search_term:
+                st.session_state.search_term = search_term
+                st.rerun()
+                
+            # Filter values based on search
+            filtered_values = filter_values(unique_values, st.session_state.search_term)
+            
+            if st.session_state.search_term and len(filtered_values) < len(unique_values):
+                st.write(f"Showing {len(filtered_values)} of {len(unique_values)} values")
+            
+            # Check if location is being requested
+            if st.session_state.pending_location:
+                value = st.session_state.pending_location.get('value')
+                st.write(f"### Getting location for: {value}")
+                if request_geolocation(value):
+                    st.rerun()
+            else:
                 st.write("## Values to enrich")
                 
                 # Create tabs for "In Progress" and "Completed"
@@ -588,9 +572,8 @@ if st.session_state.data is not None:
                                     # Only show location button if location not captured yet
                                     if not st.session_state.progress.get(value, {}).get('location', False):
                                         if st.button(f"📍 Get Location for {value}", key=f"loc_{value}"):
-                                            # Use the improved geolocation component
-                                            if geolocation_component(value):
-                                                st.rerun()
+                                            st.session_state.pending_location = {'value': value, 'status': 'pending'}
+                                            st.rerun()
                                 
                                 with col2:
                                     img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
@@ -599,15 +582,15 @@ if st.session_state.data is not None:
                                     # Only show camera button if image not captured yet
                                     if not st.session_state.progress.get(value, {}).get('image', False):
                                         if st.button(f"📸 Take Photo for {value}", key=f"activate_{value}"):
-                                            st.session_state.show_camera_modal = True
-                                            st.session_state.current_value_for_camera = value
+                                            st.session_state.camera_sidebar_active = True
+                                            st.session_state.camera_value = value
                                             st.rerun()
                     else:
                         if st.session_state.search_term:
                             st.info(f"No in-progress values match your search: '{st.session_state.search_term}'")
                         else:
                             st.info("No values in progress - all are completed!")
-                        
+                    
                 # Completed Tab
                 with completed_tab:
                     completed_values = get_completed_values()
@@ -636,7 +619,7 @@ if st.session_state.data is not None:
                             st.info(f"No completed values match your search: '{st.session_state.search_term}'")
                         else:
                             st.info("No completed values yet!")
-                        
+                    
                 # All Values Tab
                 with all_tab:
                     if len(filtered_values) > 0:
@@ -654,8 +637,8 @@ if st.session_state.data is not None:
                                     
                                     if not location_done:
                                         if st.button(f"📍 Get Location for {value}", key=f"all_loc_{value}"):
-                                            if geolocation_component(value):
-                                                st.rerun()
+                                            st.session_state.pending_location = {'value': value, 'status': 'pending'}
+                                            st.rerun()
                                     else:
                                         row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                                         loc_col = st.session_state.location_column
@@ -669,8 +652,8 @@ if st.session_state.data is not None:
                                     
                                     if not image_done:
                                         if st.button(f"📸 Take Photo for {value}", key=f"all_activate_{value}"):
-                                            st.session_state.show_camera_modal = True
-                                            st.session_state.current_value_for_camera = value
+                                            st.session_state.camera_sidebar_active = True
+                                            st.session_state.camera_value = value
                                             st.rerun()
                                     else:
                                         row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
@@ -705,3 +688,6 @@ if st.session_state.data is not None:
                         del st.session_state[key]
                     st.session_state.session_id = str(uuid.uuid4())
                     st.rerun()
+
+# Run the app
+main()
