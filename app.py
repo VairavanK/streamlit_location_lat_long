@@ -7,6 +7,7 @@ from io import BytesIO
 import uuid
 from PIL import Image
 import streamlit.components.v1 as components
+import numpy as np
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
@@ -84,6 +85,8 @@ if 'camera_active' not in st.session_state:
     st.session_state.camera_active = {}
 if 'search_term' not in st.session_state:
     st.session_state.search_term = ""
+if 'captured_images' not in st.session_state:
+    st.session_state.captured_images = {}
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -174,208 +177,205 @@ def save_image(value, image_data):
     except Exception as e:
         st.error(f"Error saving image: {e}")
 
-# Custom camera component with front/back switch - FIXED VERSION
-def custom_camera_input(value, key):
-    camera_key = f"camera_{key}"
+# Receive image from camera - new simpler approach
+def handle_camera_capture(key, image_data=None, cancelled=False):
+    # Get the value from the key
+    value = key.split('_')[1]  # Extract value from key format "cam_value"
     
+    if cancelled:
+        st.session_state.camera_active[value] = False
+        return
+        
+    if image_data:
+        try:
+            # Convert base64 to binary
+            image_bytes = base64.b64decode(image_data)
+            save_image(value, image_bytes)
+            st.session_state.camera_active[value] = False
+        except Exception as e:
+            st.error(f"Error processing image: {e}")
+
+# Custom camera component with front/back switch - SIMPLIFIED VERSION
+def custom_camera_input(value, key):
     # Only display camera if it's active for this value
     if st.session_state.camera_active.get(value, False):
-        # Use a custom HTML component for camera with front/back toggle
-        # FIXED: Reduced height, moved buttons into view, fixed save and cancel functionality
-        components.html(
-            f"""
-            <div style="display: flex; flex-direction: column; align-items: center; font-family: sans-serif; max-width: 100%;">
-                <h3>Take a photo for: {value}</h3>
-                <video id="video" width="100%" autoplay style="max-height: 300px; object-fit: cover; border-radius: 8px;"></video>
-                
-                <div style="display: flex; justify-content: center; width: 100%; margin: 10px 0; flex-wrap: wrap;">
-                    <button id="switchCamera" style="padding: 10px; background: #9C27B0; color: white; 
-                        border: none; border-radius: 5px; cursor: pointer; margin: 5px; flex: 1;">
-                        <span>📷</span> Switch Camera
-                    </button>
-                    <button id="captureBtn" style="padding: 10px; background: #4CAF50; color: white; 
-                        border: none; border-radius: 5px; cursor: pointer; margin: 5px; flex: 1;">
-                        <span>📸</span> Capture
-                    </button>
-                    <button id="cancelBtn" style="padding: 10px; background: #F44336; color: white; 
-                        border: none; border-radius: 5px; cursor: pointer; margin: 5px; flex: 1;">
-                        Cancel
-                    </button>
-                </div>
-                
-                <canvas id="canvas" style="display:none;"></canvas>
-                
-                <div id="previewContainer" style="width: 100%; margin-top: 10px; text-align: center; display: none;">
-                    <img id="preview" style="max-width: 100%; max-height: 300px; border-radius: 8px;" />
-                    <div style="display: flex; justify-content: center; width: 100%; margin: 10px 0; flex-wrap: wrap;">
-                        <button id="saveBtn" style="padding: 10px; background: #4CAF50; color: white; 
-                            border: none; border-radius: 5px; cursor: pointer; margin: 5px; flex: 1;">
-                            Save Photo
-                        </button>
-                        <button id="retakeBtn" style="padding: 10px; background: #FF9800; color: white; 
-                            border: none; border-radius: 5px; cursor: pointer; margin: 5px; flex: 1;">
-                            Retake
-                        </button>
+        st.markdown(f"### Taking photo for: {value}")
+        camera_container = st.container()
+        
+        with camera_container:
+            # Create a unique key for this camera instance
+            camera_key = f"cam_{value}"
+            
+            # Use HTML component for custom camera
+            st.components.v1.html(
+                f"""
+                <div style="text-align: center;">
+                    <div id="camera-container" style="width: 100%; margin: 0 auto;">
+                        <video id="video" autoplay style="width: 100%; max-height: 300px; object-fit: cover; border-radius: 8px;"></video>
+                        <div style="margin-top: 10px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+                            <button id="switch-btn" style="padding: 12px; background: #9C27B0; color: white; border: none; border-radius: 5px; min-width: 120px; cursor: pointer;">
+                                Switch Camera
+                            </button>
+                            <button id="capture-btn" style="padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 5px; min-width: 120px; cursor: pointer;">
+                                Take Photo
+                            </button>
+                            <button id="cancel-btn" style="padding: 12px; background: #F44336; color: white; border: none; border-radius: 5px; min-width: 120px; cursor: pointer;">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                    <div id="preview-container" style="width: 100%; display: none; margin-top: 20px;">
+                        <img id="preview" style="width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px;">
+                        <div style="margin-top: 10px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+                            <button id="save-btn" style="padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 5px; min-width: 120px; cursor: pointer;">
+                                Save Photo
+                            </button>
+                            <button id="retake-btn" style="padding: 12px; background: #FF9800; color: white; border: none; border-radius: 5px; min-width: 120px; cursor: pointer;">
+                                Retake
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
-            
-            <script>
-                // Elements
-                const video = document.getElementById('video');
-                const canvas = document.getElementById('canvas');
-                const preview = document.getElementById('preview');
-                const captureBtn = document.getElementById('captureBtn');
-                const switchBtn = document.getElementById('switchCamera');
-                const cancelBtn = document.getElementById('cancelBtn');
-                const previewContainer = document.getElementById('previewContainer');
-                const saveBtn = document.getElementById('saveBtn');
-                const retakeBtn = document.getElementById('retakeBtn');
-                
-                // State
-                let stream = null;
-                let useFrontCamera = false;
-                
-                // Start camera with specified facing mode
-                async function startCamera() {{
-                    // Stop any existing stream
-                    if (stream) {{
-                        stream.getTracks().forEach(track => track.stop());
-                    }}
+
+                <script>
+                    // Elements
+                    const video = document.getElementById('video');
+                    const cameraContainer = document.getElementById('camera-container');
+                    const previewContainer = document.getElementById('preview-container');
+                    const preview = document.getElementById('preview');
+                    const switchBtn = document.getElementById('switch-btn');
+                    const captureBtn = document.getElementById('capture-btn');
+                    const cancelBtn = document.getElementById('cancel-btn');
+                    const saveBtn = document.getElementById('save-btn');
+                    const retakeBtn = document.getElementById('retake-btn');
                     
-                    try {{
-                        // Set camera constraints
-                        const constraints = {{
-                            video: {{
-                                facingMode: useFrontCamera ? "user" : "environment"
-                            }}
-                        }};
+                    // Canvas for capturing
+                    const canvas = document.createElement('canvas');
+                    
+                    // Variables
+                    let stream = null;
+                    let useFrontCamera = false;
+                    
+                    // Start camera
+                    async function startCamera() {
+                        // Stop any previous stream
+                        if (stream) {
+                            stream.getTracks().forEach(track => track.stop());
+                        }
                         
-                        stream = await navigator.mediaDevices.getUserMedia(constraints);
-                        video.srcObject = stream;
-                    }} catch (err) {{
-                        console.error('Camera error:', err);
-                        alert('Camera access error. Try enabling camera permissions.');
+                        const constraints = {
+                            video: { facingMode: useFrontCamera ? 'user' : 'environment' }
+                        };
                         
-                        // Notify Streamlit to close camera view
-                        window.parent.postMessage({{
-                            type: "streamlit:setComponentValue",
-                            value: {{ value: "{value}", cancelled: true }}
-                        }}, "*");
-                    }}
-                }}
-                
-                // Switch camera function
-                switchBtn.addEventListener('click', () => {{
-                    useFrontCamera = !useFrontCamera;
+                        try {
+                            stream = await navigator.mediaDevices.getUserMedia(constraints);
+                            video.srcObject = stream;
+                        } catch (err) {
+                            console.error('Error accessing camera:', err);
+                            alert('Camera access error. Please check permissions.');
+                        }
+                    }
+                    
+                    // Switch camera
+                    switchBtn.addEventListener('click', () => {
+                        useFrontCamera = !useFrontCamera;
+                        startCamera();
+                    });
+                    
+                    // Take photo
+                    captureBtn.addEventListener('click', () => {
+                        // Set canvas size to match video
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        
+                        // Draw video to canvas
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0);
+                        
+                        // Show preview
+                        preview.src = canvas.toDataURL('image/jpeg');
+                        cameraContainer.style.display = 'none';
+                        previewContainer.style.display = 'block';
+                    });
+                    
+                    // Retake photo
+                    retakeBtn.addEventListener('click', () => {
+                        cameraContainer.style.display = 'block';
+                        previewContainer.style.display = 'none';
+                    });
+                    
+                    // Cancel
+                    cancelBtn.addEventListener('click', () => {
+                        if (stream) {
+                            stream.getTracks().forEach(track => track.stop());
+                        }
+                        
+                        // Send cancel message to Streamlit
+                        setTimeout(() => {
+                            window.parent.postMessage({
+                                type: "streamlit:setComponentValue", 
+                                value: {
+                                    key: "{camera_key}",
+                                    cancelled: true
+                                }
+                            }, "*");
+                        }, 100);
+                    });
+                    
+                    // Save photo
+                    saveBtn.addEventListener('click', () => {
+                        if (stream) {
+                            stream.getTracks().forEach(track => track.stop());
+                        }
+                        
+                        // Get image data without the data URL prefix
+                        const dataURL = preview.src;
+                        const base64Data = dataURL.split(',')[1];
+                        
+                        // Send to Streamlit
+                        setTimeout(() => {
+                            window.parent.postMessage({
+                                type: "streamlit:setComponentValue", 
+                                value: {
+                                    key: "{camera_key}",
+                                    imageData: base64Data
+                                }
+                            }, "*");
+                        }, 100);
+                    });
+                    
+                    // Start camera on load
                     startCamera();
-                }});
+                </script>
+                """, 
+                height=450
+            )
+            
+            # Check if we got data from the component
+            component_data = st.session_state.get(camera_key)
+            
+            if isinstance(component_data, dict):
+                # Clear it from session state to avoid reprocessing
+                data_copy = component_data.copy()
+                st.session_state[camera_key] = None
                 
-                // Capture photo function
-                captureBtn.addEventListener('click', () => {{
-                    // Set canvas dimensions to match video
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    
-                    // Draw video frame to canvas
-                    const context = canvas.getContext('2d');
-                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    
-                    // Convert to image and show preview
-                    preview.src = canvas.toDataURL('image/jpeg');
-                    
-                    // Show preview, hide camera
-                    video.style.display = 'none';
-                    captureBtn.style.display = 'none';
-                    switchBtn.style.display = 'none';
-                    cancelBtn.style.display = 'none';
-                    previewContainer.style.display = 'block';
-                }});
-                
-                // Save photo function
-                saveBtn.addEventListener('click', () => {{
-                    // Get base64 image data without prefix
-                    const imageData = preview.src.split(',')[1];
-                    
-                    // Stop all tracks
-                    if (stream) {{
-                        stream.getTracks().forEach(track => track.stop());
-                    }}
-                    
-                    // Send data to Streamlit
-                    window.parent.postMessage({{
-                        type: "streamlit:setComponentValue",
-                        value: {{ value: "{value}", imageData: imageData }}
-                    }}, "*");
-                }});
-                
-                // Retake photo function
-                retakeBtn.addEventListener('click', () => {{
-                    // Hide preview, show camera
-                    previewContainer.style.display = 'none';
-                    video.style.display = 'block';
-                    captureBtn.style.display = 'block';
-                    switchBtn.style.display = 'block';
-                    cancelBtn.style.display = 'block';
-                }});
-                
-                // Cancel function
-                cancelBtn.addEventListener('click', () => {{
-                    // Stop all tracks
-                    if (stream) {{
-                        stream.getTracks().forEach(track => track.stop());
-                    }}
-                    
-                    // Send cancel message to Streamlit
-                    window.parent.postMessage({{
-                        type: "streamlit:setComponentValue",
-                        value: {{ value: "{value}", cancelled: true }}
-                    }}, "*");
-                }});
-                
-                // Start camera on load
-                startCamera();
-            </script>
-            """,
-            height=450,  # Reduced height to fit buttons
-        )
-        
-        # Check if we got data back from component
-        received_data = st.session_state.get(camera_key, None)
-        
-        if received_data:
-            # Handle cancel action
-            if isinstance(received_data, dict) and received_data.get('cancelled', False):
-                st.session_state.camera_active[value] = False
-                # Clear the data from session state to avoid reprocessing
-                if camera_key in st.session_state:
-                    del st.session_state[camera_key]
-                st.rerun()
-                
-            # Handle image data
-            if isinstance(received_data, dict) and 'imageData' in received_data:
-                try:
-                    # Convert base64 to binary
-                    image_bytes = base64.b64decode(received_data['imageData'])
-                    save_image(value, image_bytes)
-                    
-                    # Clear the data from session state to avoid reprocessing
-                    if camera_key in st.session_state:
-                        del st.session_state[camera_key]
-                        
+                # Handle cancel
+                if data_copy.get('cancelled', False):
                     st.session_state.camera_active[value] = False
-                    return True
-                except Exception as e:
-                    st.error(f"Error processing image: {e}")
-        
-        return False
-    
-    # Show a button to activate the camera
-    if st.button(f"📸 Take Photo for {value}", key=f"activate_{key}"):
-        st.session_state.camera_active[value] = True
-        st.rerun()
-        
-    return False
+                    st.rerun()
+                
+                # Handle image data
+                if 'imageData' in data_copy:
+                    try:
+                        image_bytes = base64.b64decode(data_copy['imageData'])
+                        save_image(value, image_bytes)
+                    except Exception as e:
+                        st.error(f"Error processing image: {e}")
+    else:
+        # Show a button to activate the camera
+        if st.button(f"📸 Take Photo for {value}", key=f"activate_{key}"):
+            st.session_state.camera_active[value] = True
+            st.rerun()
 
 # Display image from base64
 def display_image_from_base64(base64_string, width=200):
@@ -389,7 +389,13 @@ def filter_values(values, search_term):
     if not search_term:
         return values
     search_term = str(search_term).lower()
-    return [v for v in values if str(v).lower().find(search_term) >= 0]
+    filtered = []
+    for v in values:
+        # Convert any value to string for searching
+        v_str = str(v).lower()
+        if search_term in v_str:
+            filtered.append(v)
+    return filtered
 
 # Main app layout
 st.title("Data Enrichment with Location and Images")
@@ -422,7 +428,9 @@ if st.session_state.data is not None:
             st.session_state.selected_column = selected_column
             
             # Initialize progress tracking for each value
-            for value in st.session_state.data[st.session_state.selected_column].unique():
+            unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique()
+            
+            for value in unique_values:
                 if value not in st.session_state.progress:
                     st.session_state.progress[value] = {'location': False, 'image': False}
                 if value not in st.session_state.camera_active:
@@ -435,7 +443,8 @@ if st.session_state.data is not None:
     if st.session_state.selected_column is not None:
         st.write(f"Enriching data for column: **{st.session_state.selected_column}**")
         
-        unique_values = st.session_state.data[st.session_state.selected_column].unique()
+        # Convert to strings to avoid numpy array issues
+        unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique().tolist()
         
         # Search and filter functionality
         search_term = st.text_input("🔍 Search values:", value=st.session_state.search_term)
@@ -454,19 +463,23 @@ if st.session_state.data is not None:
         # Create tabs for "In Progress" and "Completed"
         in_progress_tab, completed_tab, all_tab = st.tabs(["In Progress", "Completed", "All Values"])
         
-        # Helper functions for grouping values - now with filtering
+        # Helper functions for grouping values
         def get_in_progress_values():
-            values = [v for v in filtered_values if not (
-                st.session_state.progress.get(v, {}).get('location', False) and 
-                st.session_state.progress.get(v, {}).get('image', False)
-            )]
+            values = []
+            for v in filtered_values:
+                loc_done = st.session_state.progress.get(v, {}).get('location', False)
+                img_done = st.session_state.progress.get(v, {}).get('image', False)
+                if not (loc_done and img_done):
+                    values.append(v)
             return values
             
         def get_completed_values():
-            values = [v for v in filtered_values if (
-                st.session_state.progress.get(v, {}).get('location', False) and 
-                st.session_state.progress.get(v, {}).get('image', False)
-            )]
+            values = []
+            for v in filtered_values:
+                loc_done = st.session_state.progress.get(v, {}).get('location', False)
+                img_done = st.session_state.progress.get(v, {}).get('image', False)
+                if loc_done and img_done:
+                    values.append(v)
             return values
         
         # In Progress Tab
@@ -531,7 +544,7 @@ if st.session_state.data is not None:
                         
                         with col1:
                             st.write("Location: ✅")
-                            row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
+                            row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                             loc_col = st.session_state.location_column
                             if loc_col and loc_col in st.session_state.data.columns:
                                 loc_data = st.session_state.data.loc[row_idx, loc_col]
@@ -539,7 +552,7 @@ if st.session_state.data is not None:
                         
                         with col2:
                             st.write("Image: ✅")
-                            row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
+                            row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                             img_col = st.session_state.image_column
                             if img_col and img_col in st.session_state.data.columns:
                                 base64_image = st.session_state.data.loc[row_idx, img_col]
@@ -552,7 +565,7 @@ if st.session_state.data is not None:
                 
         # All Values Tab
         with all_tab:
-            if filtered_values:
+            if len(filtered_values) > 0:
                 for value in filtered_values:
                     location_done = st.session_state.progress.get(value, {}).get('location', False)
                     image_done = st.session_state.progress.get(value, {}).get('image', False)
@@ -573,7 +586,7 @@ if st.session_state.data is not None:
                                     lat, lng = 37.7749, -122.4194
                                     save_location(value, lat, lng)
                             else:
-                                row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
+                                row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                                 loc_col = st.session_state.location_column
                                 if loc_col and loc_col in st.session_state.data.columns:
                                     loc_data = st.session_state.data.loc[row_idx, loc_col]
@@ -586,7 +599,7 @@ if st.session_state.data is not None:
                             if not image_done:
                                 custom_camera_input(value, f"all_cam_{value}")
                             else:
-                                row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column] == value].index[0]
+                                row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                                 img_col = st.session_state.image_column
                                 if img_col and img_col in st.session_state.data.columns:
                                     base64_image = st.session_state.data.loc[row_idx, img_col]
@@ -596,12 +609,13 @@ if st.session_state.data is not None:
         
         # Display progress stats
         total = len(unique_values)
-        completed = len(get_completed_values()) if not st.session_state.search_term else len([v for v in unique_values if (
+        completed_count = len([v for v in unique_values if (
             st.session_state.progress.get(v, {}).get('location', False) and 
             st.session_state.progress.get(v, {}).get('image', False)
         )])
         
-        st.write(f"## Progress: {completed}/{total} values completed ({int(completed/total*100 if total else 0)}%)")
+        progress_pct = int(completed_count/total*100) if total else 0
+        st.write(f"## Progress: {completed_count}/{total} values completed ({progress_pct}%)")
         
         # Download section
         st.write("## Download Enriched Data")
