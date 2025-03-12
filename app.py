@@ -12,7 +12,7 @@ import numpy as np
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling with improved camera handling
+# Add mobile-friendly styling
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -69,64 +69,67 @@ st.markdown("""
         margin: 0 auto;
     }
     
-    /* Camera modal styling */
-    .modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0,0,0,0.8);
-        z-index: 1000;
-        padding: 20px;
+    /* Location found highlight */
+    .location-found {
+        background-color: #e6f7ff;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #91d5ff;
+        margin-bottom: 10px;
     }
 </style>
 
 <script>
-// Force back camera selection for all camera inputs
+// Force back camera for mobile devices
 document.addEventListener('DOMContentLoaded', function() {
-    // Setup mutation observer to detect when camera is added
-    const observer = new MutationObserver(function(mutations) {
-        // Check for video elements
+    // Function to set up back camera
+    function setupBackCamera() {
         const videoElements = document.querySelectorAll('.stCamera video');
         videoElements.forEach(function(video) {
             if (video && !video.hasAttribute('data-camera-setup')) {
-                // Stop any existing stream
-                if (video.srcObject) {
-                    const tracks = video.srcObject.getTracks();
-                    tracks.forEach(track => track.stop());
-                }
+                // Check if this is a mobile device
+                const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
                 
-                // Try to get environment-facing camera
-                navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { exact: "environment" }
+                if (isMobile) {
+                    // Stop any existing stream
+                    if (video.srcObject) {
+                        const tracks = video.srcObject.getTracks();
+                        tracks.forEach(track => track.stop());
                     }
-                }).then(function(stream) {
-                    video.srcObject = stream;
-                    video.setAttribute('data-camera-setup', 'true');
-                }).catch(function(err) {
-                    // Fallback to any camera if environment camera fails
-                    console.log('Falling back to any camera: ' + err);
+                    
+                    // Try to get environment-facing camera
                     navigator.mediaDevices.getUserMedia({
-                        video: true
+                        video: {
+                            facingMode: { exact: "environment" }
+                        }
                     }).then(function(stream) {
                         video.srcObject = stream;
                         video.setAttribute('data-camera-setup', 'true');
+                    }).catch(function(err) {
+                        // Fallback to any camera if environment camera fails
+                        console.log('Falling back to any camera: ' + err);
+                        navigator.mediaDevices.getUserMedia({
+                            video: true
+                        }).then(function(stream) {
+                            video.srcObject = stream;
+                            video.setAttribute('data-camera-setup', 'true');
+                        });
                     });
-                });
+                }
             }
         });
+    }
+    
+    // Set up a mutation observer to watch for camera elements
+    const observer = new MutationObserver(function(mutations) {
+        setupBackCamera();
     });
     
     // Start observing
     observer.observe(document.body, { childList: true, subtree: true });
     
     // Try immediately and also after a short delay
-    setTimeout(function() {
-        observer.disconnect();
-        observer.observe(document.body, { childList: true, subtree: true });
-    }, 1000);
+    setTimeout(setupBackCamera, 1000);
 });
 </script>
 """, unsafe_allow_html=True)
@@ -168,6 +171,8 @@ if 'camera_sidebar_active' not in st.session_state:
     st.session_state.camera_sidebar_active = False
 if 'camera_value' not in st.session_state:
     st.session_state.camera_value = None
+if 'manual_location_mode' not in st.session_state:
+    st.session_state.manual_location_mode = False
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -214,7 +219,7 @@ def get_csv_download_link(df):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="big-camera-button">Download Enriched CSV</a>'
     return href
 
-# Save location data
+# Save location data - Fixed to ensure location gets properly saved
 def save_location(value, lat, lng):
     if st.session_state.location_column is None:
         st.session_state.location_column = f"{st.session_state.selected_column}_location"
@@ -280,156 +285,194 @@ def filter_values(values, search_term):
             filtered.append(v)
     return filtered
 
-# Fixed geolocation component without using key parameter
-def request_geolocation(value):
-    # Create a unique ID for this geolocation request
-    loc_id = f"loc_{value}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+# Manual location entry as fallback
+def manual_location_entry(value):
+    st.write(f"### Enter location coordinates for: {value}")
     
-    # Set up session state to track this location request
-    st.session_state.pending_location = {'value': value, 'id': loc_id, 'status': 'pending'}
+    col1, col2 = st.columns(2)
+    with col1:
+        lat = st.number_input("Latitude", value=0.0, format="%.7f", step=0.0000001, key=f"lat_{value}")
+    with col2:
+        lng = st.number_input("Longitude", value=0.0, format="%.7f", step=0.0000001, key=f"lng_{value}")
     
-    # HTML component without key parameter
-    components.html(
-        f"""
-        <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 10px;">
-            <div id="status">Requesting your location...</div>
-            <div id="coords" style="margin-top: 10px; display: none;">
-                <div><strong>Latitude:</strong> <span id="lat"></span></div>
-                <div><strong>Longitude:</strong> <span id="lng"></span></div>
-                <div><strong>Accuracy:</strong> <span id="acc"></span> meters</div>
-            </div>
-            <button id="cancel-btn" style="margin-top: 10px; display: none;">Cancel</button>
-        </div>
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Save Coordinates", key=f"save_manual_{value}"):
+            if save_location(value, lat, lng):
+                st.success(f"Location saved: {lat}, {lng}")
+                st.session_state.pending_location = None
+                st.session_state.manual_location_mode = False
+                st.rerun()
+    
+    with col2:
+        if st.button("Cancel", key=f"cancel_manual_{value}"):
+            st.session_state.pending_location = None
+            st.session_state.manual_location_mode = False
+            st.rerun()
 
-        <script>
-            // Create a unique ID for this location request
-            const locId = "{loc_id}";
-            
-            // Function to update status message
-            function updateStatus(message) {{
-                document.getElementById('status').innerHTML = message;
-            }}
-            
-            // Function to set Streamlit session state
-            function setSessionState(key, value) {{
-                const event = new CustomEvent('streamlit:setSessionState', {{
-                    detail: {{ data: {{ [key]: value }} }}
-                }});
-                window.dispatchEvent(event);
-            }}
-            
-            // Function to get location
-            function getLocation() {{
-                updateStatus("<span style='color:blue;'>Requesting permission to access your location...</span>");
-                document.getElementById('cancel-btn').style.display = 'block';
-                
-                if (navigator.geolocation) {{
-                    navigator.geolocation.getCurrentPosition(
-                        // Success callback
-                        function(position) {{
-                            const lat = position.coords.latitude;
-                            const lng = position.coords.longitude;
-                            const accuracy = position.coords.accuracy;
-                            
-                            // Display values
-                            document.getElementById('lat').textContent = lat;
-                            document.getElementById('lng').textContent = lng;
-                            document.getElementById('acc').textContent = accuracy;
-                            document.getElementById('coords').style.display = 'block';
-                            
-                            // Update status
-                            updateStatus("<span style='color:green;'>Location found! Saving...</span>");
-                            
-                            // Save location data in session state
-                            setSessionState('geolocation_data', {{
-                                value: "{value}",
-                                id: locId,
-                                lat: lat,
-                                lng: lng,
-                                accuracy: accuracy
-                            }});
-                            
-                            // Submit form to trigger rerun
-                            setTimeout(function() {{
-                                const streamlitApp = window.parent.document;
-                                const buttons = streamlitApp.querySelectorAll('button[kind=primaryFormSubmit]');
-                                if (buttons.length) {{
-                                    buttons[0].click();
-                                }}
-                            }}, 500);
-                        }},
-                        // Error callback
-                        function(error) {{
-                            let errorMsg = "";
-                            switch(error.code) {{
-                                case error.PERMISSION_DENIED:
-                                    errorMsg = "Location permission denied by user.";
-                                    break;
-                                case error.POSITION_UNAVAILABLE:
-                                    errorMsg = "Location information is unavailable.";
-                                    break;
-                                case error.TIMEOUT:
-                                    errorMsg = "The request to get location timed out.";
-                                    break;
-                                default:
-                                    errorMsg = "An unknown location error occurred.";
-                            }}
-                            updateStatus(`<span style='color:red;'>Error: ${{errorMsg}}</span>`);
-                            setSessionState('pending_location', null);
-                        }},
-                        // Options
-                        {{
-                            enableHighAccuracy: true,
-                            timeout: 10000,
-                            maximumAge: 0
-                        }}
-                    );
-                }} else {{
-                    updateStatus("<span style='color:red;'>Geolocation is not supported by this browser.</span>");
-                    setSessionState('pending_location', null);
-                }}
-            }}
-            
-            // Add event listener to cancel button
-            document.getElementById('cancel-btn').addEventListener('click', function() {{
-                setSessionState('pending_location', null);
-                // Submit form to trigger rerun
-                const streamlitApp = window.parent.document;
-                const buttons = streamlitApp.querySelectorAll('button[kind=primaryFormSubmit]');
-                if (buttons.length) {{
-                    buttons[0].click();
-                }}
-            }});
-            
-            // Start the location request immediately
-            getLocation();
-        </script>
-        """,
-        height=150
-    )
+# Improved geolocation component
+def request_geolocation(value):
+    # Check if we're in manual entry mode
+    if st.session_state.manual_location_mode:
+        manual_location_entry(value)
+        return
     
-    # Add a cancel button in Streamlit
-    if st.button("Cancel", key=f"cancel_geo_{value}"):
-        st.session_state.pending_location = None
+    st.write(f"### Getting location for: {value}")
+    
+    # Add an option to switch to manual entry
+    if st.button("Switch to Manual Coordinate Entry", key=f"manual_switch_{value}"):
+        st.session_state.manual_location_mode = True
         st.rerun()
     
-    # Check if we have geolocation data for this value
-    if 'geolocation_data' in st.session_state and isinstance(st.session_state.geolocation_data, dict):
-        geo_data = st.session_state.geolocation_data
-        if geo_data.get('id') == loc_id and geo_data.get('value') == value and 'lat' in geo_data and 'lng' in geo_data:
-            # Save the location
-            lat = geo_data['lat']
-            lng = geo_data['lng']
-            if save_location(value, lat, lng):
-                # Clear pending location and geolocation data
-                st.session_state.pending_location = None
-                st.session_state.geolocation_data = {}
-                st.success(f"Location saved for {value}: {lat}, {lng}")
-                return True
+    # Create a container for browser geolocation
+    geoloc_container = st.container()
     
-    return False
+    with geoloc_container:
+        # Inject JavaScript to get geolocation and set values in localStorage
+        components.html(
+            f"""
+            <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 10px;">
+                <div id="status">Requesting your location...</div>
+                <div id="coords" style="margin-top: 10px; display: none;">
+                    <div><strong>Latitude:</strong> <span id="lat"></span></div>
+                    <div><strong>Longitude:</strong> <span id="lng"></span></div>
+                    <div><strong>Accuracy:</strong> <span id="acc"></span> meters</div>
+                </div>
+            </div>
 
-# Sidebar camera implementation that doesn't navigate away from main page
+            <script>
+                // Function to update status
+                function updateStatus(message) {{
+                    document.getElementById('status').innerHTML = message;
+                }}
+                
+                // Function to get location
+                function getLocation() {{
+                    updateStatus("<span style='color:blue;'>Requesting permission to access your location...</span>");
+                    
+                    if (navigator.geolocation) {{
+                        navigator.geolocation.getCurrentPosition(
+                            // Success callback
+                            function(position) {{
+                                const lat = position.coords.latitude;
+                                const lng = position.coords.longitude;
+                                const accuracy = position.coords.accuracy;
+                                
+                                // Save to localStorage so buttons below can access it
+                                localStorage.setItem('current_lat', lat);
+                                localStorage.setItem('current_lng', lng);
+                                
+                                // Display values
+                                document.getElementById('lat').textContent = lat;
+                                document.getElementById('lng').textContent = lng;
+                                document.getElementById('acc').textContent = accuracy;
+                                document.getElementById('coords').style.display = 'block';
+                                
+                                // Update status
+                                updateStatus("<span style='color:green;'>Location found! Click the Save Location button below.</span>");
+                                
+                                // Make the div visually distinct
+                                document.querySelector('div').classList.add('location-found');
+                            }},
+                            // Error callback
+                            function(error) {{
+                                let errorMsg = "";
+                                switch(error.code) {{
+                                    case error.PERMISSION_DENIED:
+                                        errorMsg = "Location permission denied by user.";
+                                        break;
+                                    case error.POSITION_UNAVAILABLE:
+                                        errorMsg = "Location information is unavailable.";
+                                        break;
+                                    case error.TIMEOUT:
+                                        errorMsg = "The request to get location timed out.";
+                                        break;
+                                    default:
+                                        errorMsg = "An unknown location error occurred.";
+                                }}
+                                updateStatus(`<span style='color:red;'>Error: ${{errorMsg}}</span>`);
+                            }},
+                            // Options
+                            {{
+                                enableHighAccuracy: true,
+                                timeout: 10000,
+                                maximumAge: 0
+                            }}
+                        );
+                    }} else {{
+                        updateStatus("<span style='color:red;'>Geolocation is not supported by this browser.</span>");
+                    }}
+                }}
+                
+                // Start the location request
+                getLocation();
+            </script>
+            """,
+            height=150
+        )
+    
+    # Add buttons for saving or canceling
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Save Location", key=f"save_location_{value}"):
+            # Run JavaScript to get values from localStorage and save them
+            components.html(
+                """
+                <script>
+                    // Get coordinates from localStorage
+                    const lat = localStorage.getItem('current_lat');
+                    const lng = localStorage.getItem('current_lng');
+                    
+                    // Pass them back to Python via URL parameters
+                    if (lat && lng) {
+                        // Create URL with coordinates
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('save_location', 'true');
+                        url.searchParams.set('lat', lat);
+                        url.searchParams.set('lng', lng);
+                        url.searchParams.set('_timestamp', Date.now()); // Force reload
+                        
+                        // Navigate to this URL
+                        window.location.href = url.toString();
+                    } else {
+                        // If no coordinates yet, show alert
+                        alert("No location coordinates available yet. Please wait for the location to be found.");
+                    }
+                </script>
+                """,
+                height=0
+            )
+            
+            # Check URL parameters
+            params = st.experimental_get_query_params()
+            if 'save_location' in params and params.get('save_location', [''])[0] == 'true':
+                try:
+                    lat = float(params.get('lat', ['0'])[0])
+                    lng = float(params.get('lng', ['0'])[0])
+                    
+                    if lat != 0 and lng != 0:  # Basic validation
+                        if save_location(value, lat, lng):
+                            st.success(f"Location saved: {lat}, {lng}")
+                            
+                            # Clear parameters and session state
+                            st.session_state.pending_location = None
+                            
+                            # Clean URL params
+                            clean_params = {k: v for k, v in params.items() 
+                                           if k not in ['save_location', 'lat', 'lng']}
+                            st.experimental_set_query_params(**clean_params)
+                            
+                            st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving location: {e}")
+    
+    with col2:
+        if st.button("Cancel", key=f"cancel_geo_{value}"):
+            st.session_state.pending_location = None
+            st.rerun()
+
+# Sidebar camera implementation
 def show_camera_sidebar(value):
     # Create a sidebar for the camera
     with st.sidebar:
@@ -459,8 +502,45 @@ def show_camera_sidebar(value):
             except Exception as e:
                 st.error(f"Error saving photo: {e}")
 
-# Main app layout
+# Check URL parameters for location data
+def check_location_params():
+    # Get URL parameters
+    params = st.experimental_get_query_params()
+    
+    # Check if location was found and should be saved
+    if 'save_location' in params and params.get('save_location', [''])[0] == 'true':
+        # Get the current value being processed
+        value = st.session_state.pending_location.get('value') if st.session_state.pending_location else None
+        
+        if value and 'lat' in params and 'lng' in params:
+            try:
+                lat = float(params.get('lat', ['0'])[0])
+                lng = float(params.get('lng', ['0'])[0])
+                
+                # Basic validation
+                if lat != 0 and lng != 0:
+                    # Save location
+                    if save_location(value, lat, lng):
+                        # Clean up session state
+                        st.session_state.pending_location = None
+                        
+                        # Clean up URL parameters
+                        clean_params = {k: v for k, v in params.items() 
+                                      if k not in ['save_location', 'lat', 'lng']}
+                        st.experimental_set_query_params(**clean_params)
+                        
+                        return True
+            except Exception as e:
+                st.error(f"Error processing location: {e}")
+    
+    return False
+
+# Main app
 def main():
+    # Check for location parameters in URL
+    if check_location_params():
+        st.rerun()
+    
     # Check if camera sidebar is active
     if st.session_state.camera_sidebar_active and st.session_state.camera_value:
         show_camera_sidebar(st.session_state.camera_value)
@@ -529,9 +609,7 @@ def main():
             # Check if location is being requested
             if st.session_state.pending_location:
                 value = st.session_state.pending_location.get('value')
-                st.write(f"### Getting location for: {value}")
-                if request_geolocation(value):
-                    st.rerun()
+                request_geolocation(value)
             else:
                 st.write("## Values to enrich")
                 
@@ -573,6 +651,7 @@ def main():
                                     if not st.session_state.progress.get(value, {}).get('location', False):
                                         if st.button(f"📍 Get Location for {value}", key=f"loc_{value}"):
                                             st.session_state.pending_location = {'value': value, 'status': 'pending'}
+                                            st.session_state.manual_location_mode = False
                                             st.rerun()
                                 
                                 with col2:
@@ -638,6 +717,7 @@ def main():
                                     if not location_done:
                                         if st.button(f"📍 Get Location for {value}", key=f"all_loc_{value}"):
                                             st.session_state.pending_location = {'value': value, 'status': 'pending'}
+                                            st.session_state.manual_location_mode = False
                                             st.rerun()
                                     else:
                                         row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
@@ -690,4 +770,5 @@ def main():
                     st.rerun()
 
 # Run the app
-main()
+if __name__ == "__main__":
+    main()
