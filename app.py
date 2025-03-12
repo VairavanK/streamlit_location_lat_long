@@ -84,10 +84,8 @@ if 'camera_active' not in st.session_state:
     st.session_state.camera_active = {}
 if 'search_term' not in st.session_state:
     st.session_state.search_term = ""
-if 'camera_sidebar_active' not in st.session_state:
-    st.session_state.camera_sidebar_active = False
-if 'camera_value' not in st.session_state:
-    st.session_state.camera_value = None
+if 'active_capture_value' not in st.session_state:
+    st.session_state.active_capture_value = None
 if 'location_requested' not in st.session_state:
     st.session_state.location_requested = {}
 
@@ -155,10 +153,6 @@ def save_image(value, image_data):
                 # Store base64 image directly in the dataframe
                 st.session_state.data.loc[row_idx, st.session_state.image_column] = base64_image
                 st.session_state.progress[value]['image'] = True
-                # Turn off camera after capture
-                st.session_state.camera_active[value] = False
-                st.session_state.camera_sidebar_active = False
-                st.session_state.camera_value = None
                 return True
         else:
             st.error("Failed to process image")
@@ -190,7 +184,7 @@ def get_and_save_location(value, prefix=""):
         st.session_state.location_requested[loc_request_key] = False
     
     # Button to get location OR continue if already requested
-    if st.button(f"📍 Get Location for {value}", key=f"{prefix}_getloc_{value}") or st.session_state.location_requested[loc_request_key]:
+    if st.button(f"📍 Get Location", key=f"{prefix}_getloc_{value}") or st.session_state.location_requested[loc_request_key]:
         # Set flag that we've requested location
         st.session_state.location_requested[loc_request_key] = True
         
@@ -213,15 +207,10 @@ def get_and_save_location(value, prefix=""):
                     </script>
                     """, height=100)
                     
-                    # Add manual refresh and cancel options
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("I've granted permission - refresh", key=f"{prefix}_refresh_{value}"):
-                            st.rerun()
-                    with col2:
-                        if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
-                            st.session_state.location_requested[loc_request_key] = False
-                            st.rerun()
+                    # Add cancel option
+                    if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
+                        st.session_state.location_requested[loc_request_key] = False
+                        st.rerun()
                 elif isinstance(location_data, dict) and 'coords' in location_data:
                     # We have the location data!
                     coords = location_data['coords']
@@ -240,76 +229,26 @@ def get_and_save_location(value, prefix=""):
                     st.error("Unexpected response from geolocation service.")
         except Exception as e:
             st.error(f"Error getting location: {str(e)}")
-        
-        # Manual entry as fallback
-        st.write("Enter coordinates manually:")
-        col1, col2 = st.columns(2)
-        with col1:
-            man_lat = st.number_input("Latitude", value=0.0, format="%.7f", key=f"{prefix}_manlat_{value}")
-        with col2:
-            man_lng = st.number_input("Longitude", value=0.0, format="%.7f", key=f"{prefix}_manlng_{value}")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Save Manual Coordinates", key=f"{prefix}_saveman_{value}"):
-                if save_location(value, man_lat, man_lng):
-                    st.success(f"Manual location saved: {man_lat}, {man_lng}")
-                    st.session_state.location_requested[loc_request_key] = False
-                    return True
-        with col2:
-            if st.button("Cancel Location", key=f"{prefix}_cancelall_{value}"):
+            if st.button("Cancel", key=f"{prefix}_error_cancel_{value}"):
                 st.session_state.location_requested[loc_request_key] = False
                 st.rerun()
     
     return False
 
-# Sidebar camera implementation
-def show_camera_sidebar(value):
-    with st.sidebar:
-        st.title(f"Take Photo for {value}")
-        
-        # Add camera input in the sidebar
-        photo = st.camera_input("Camera", key=f"sidebar_cam_{value}")
-        
-        # Cancel button
-        if st.button("Cancel", key=f"sidebar_cancel_{value}"):
-            st.session_state.camera_sidebar_active = False
-            st.session_state.camera_value = None
-            st.rerun()
-        
-        # Process the captured image
-        if photo is not None:
-            try:
-                # Get image data
-                image_data = photo.getvalue()
-                # Process and save the image
-                if save_image(value, image_data):
-                    st.success("Photo saved successfully!")
-                    # Turn off camera
-                    st.session_state.camera_sidebar_active = False
-                    st.session_state.camera_value = None
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Error saving photo: {e}")
-
 # Main app
 def main():
-    # Check if camera sidebar is active
-    if st.session_state.camera_sidebar_active and st.session_state.camera_value:
-        show_camera_sidebar(st.session_state.camera_value)
-    
-    # Main app content
     st.title("Data Enrichment with Location and Images")
     
     # Step 1: Upload CSV file
-    uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
-    
-    if uploaded_file and st.session_state.data is None:
-        try:
-            st.session_state.data = pd.read_csv(uploaded_file)
-            st.success("CSV file uploaded successfully!")
-        except Exception as e:
-            st.error(f"Error: {e}")
+    if st.session_state.data is None:
+        uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+        
+        if uploaded_file:
+            try:
+                st.session_state.data = pd.read_csv(uploaded_file)
+                st.success("CSV file uploaded successfully!")
+            except Exception as e:
+                st.error(f"Error: {e}")
     
     # Step 2: Column selection
     if st.session_state.data is not None:
@@ -336,6 +275,38 @@ def main():
         
         # Step 3: Enrich each value
         if st.session_state.selected_column is not None:
+            
+            # Handle active image capture session
+            if st.session_state.active_capture_value is not None:
+                value = st.session_state.active_capture_value
+                st.subheader(f"Taking Photo for: {value}")
+                
+                # Add camera input
+                photo = st.camera_input("Camera", key=f"cam_{value}")
+                
+                # Cancel button
+                if st.button("Cancel", key=f"cam_cancel_{value}"):
+                    st.session_state.active_capture_value = None
+                    st.rerun()
+                
+                # Process the captured image
+                if photo is not None:
+                    try:
+                        # Get image data
+                        image_data = photo.getvalue()
+                        # Process and save the image
+                        if save_image(value, image_data):
+                            st.success("Photo saved successfully!")
+                            # Turn off camera
+                            st.session_state.active_capture_value = None
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Error saving photo: {e}")
+                        
+                # Early return if we're capturing an image
+                return
+                
+            # Main enrichment UI
             st.write(f"Enriching data for column: **{st.session_state.selected_column}**")
             
             # Convert to strings to avoid numpy array issues
@@ -395,9 +366,8 @@ def main():
                                 
                                 # Only show camera button if image not captured yet
                                 if not st.session_state.progress.get(value, {}).get('image', False):
-                                    if st.button(f"📸 Take Photo for {value}", key=f"ip_activate_{value}"):
-                                        st.session_state.camera_sidebar_active = True
-                                        st.session_state.camera_value = value
+                                    if st.button(f"📸 Take Photo", key=f"ip_activate_{value}"):
+                                        st.session_state.active_capture_value = value
                                         st.rerun()
                 else:
                     if st.session_state.search_term:
@@ -465,9 +435,8 @@ def main():
                                 st.write(f"Image: {img_status}")
                                 
                                 if not image_done:
-                                    if st.button(f"📸 Take Photo for {value}", key=f"all_activate_{value}"):
-                                        st.session_state.camera_sidebar_active = True
-                                        st.session_state.camera_value = value
+                                    if st.button(f"📸 Take Photo", key=f"all_activate_{value}"):
+                                        st.session_state.active_capture_value = value
                                         st.rerun()
                                 else:
                                     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
