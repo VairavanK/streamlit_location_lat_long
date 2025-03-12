@@ -11,7 +11,7 @@ from streamlit_back_camera_input import back_camera_input  # Import the back cam
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling with fixes for back camera component
+# Add mobile-friendly styling with minimal camera CSS
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -37,7 +37,7 @@ st.markdown("""
         }
     }
     
-    /* Enhanced camera button */
+    /* Enhanced download button */
     .big-camera-button {
         display: block;
         width: 100%;
@@ -56,85 +56,7 @@ st.markdown("""
     .stButton > button {
         font-weight: bold;
     }
-    
-    /* Critical fixes for back camera display */
-    .stCamera {
-        min-height: 480px !important;
-        overflow: visible !important;
-    }
-    
-    .stCamera > div:first-child {
-        height: auto !important;
-        min-height: 400px !important;
-        overflow: visible !important;
-    }
-    
-    /* Fix camera video element */
-    .stCamera video {
-        height: 400px !important;
-        width: 100% !important;
-        object-fit: cover !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-    
-    /* Make camera controls visible */
-    .stCamera button {
-        display: block !important;
-        width: 60px !important;
-        height: 60px !important;
-        margin: 10px auto !important;
-        background-color: red !important;
-        border-radius: 50% !important;
-        opacity: 1 !important;
-        position: relative !important;
-        z-index: 1000 !important;
-        border: 3px solid white !important;
-    }
-    
-    /* Camera prompt text */
-    .camera-prompt {
-        position: relative;
-        margin-top: -70px;
-        margin-bottom: 20px;
-        text-align: center;
-        color: white;
-        background-color: rgba(0,0,0,0.7);
-        padding: 8px 16px;
-        border-radius: 20px;
-        width: fit-content;
-        margin-left: auto;
-        margin-right: auto;
-        font-weight: bold;
-        z-index: 1001;
-    }
-    
-    /* Fix for streamlit-back-camera-input */
-    /* This is critical to fix the aspect ratio issue */
-    .element-container:has(.stCamera) {
-        height: auto !important;
-        min-height: 480px !important;
-    }
 </style>
-<script>
-// Add a custom script to help with camera button visibility
-document.addEventListener('DOMContentLoaded', function() {
-    // Function to make camera button more visible
-    function fixCameraButton() {
-        const cameraButtons = document.querySelectorAll('.stCamera button');
-        cameraButtons.forEach(button => {
-            button.style.backgroundColor = 'red';
-            button.style.opacity = '1';
-            button.style.position = 'relative';
-            button.style.zIndex = '1000';
-        });
-    }
-    
-    // Run initially and then periodically to catch any dynamically added elements
-    fixCameraButton();
-    setInterval(fixCameraButton, 1000);
-});
-</script>
 """, unsafe_allow_html=True)
 
 # Session state initialization
@@ -355,25 +277,14 @@ def main():
                 value = st.session_state.active_capture_value
                 st.subheader(f"Taking Photo for: {value}")
                 
-                # Info before camera
-                st.info("Please position the item in view and tap to take a photo")
+                # Simple instructions
+                st.info("Please position the item in view and tap on the video area to take a photo. You might need to tap twice.")
                 
-                # Create a container for the camera with proper spacing
-                with st.container():
-                    # Empty space to help with layout
-                    st.write("")
-                    
-                    # Use back camera component
-                    photo = back_camera_input("", key=f"cam_{value}")
-                    
-                    # Add help text that should appear below the camera
-                    st.markdown('<div class="camera-prompt">Tap to capture</div>', unsafe_allow_html=True)
+                # Use back camera component
+                photo = back_camera_input("", key=f"cam_{value}")
                 
-                # Empty space for better layout
-                st.write("")
-                
-                # Large cancel button below camera
-                if st.button("✖️ Cancel Photo Capture", key=f"cam_cancel_{value}"):
+                # Cancel button
+                if st.button("Cancel Photo Capture", key=f"cam_cancel_{value}"):
                     st.session_state.active_capture_value = None
                     st.rerun()
                 
@@ -391,8 +302,8 @@ def main():
                             img = Image.open(BytesIO(image_data))
                             st.image(img, width=300)
                             
-                            # Continue button instead of automatic return
-                            if st.button("✅ Continue", key="continue_after_capture"):
+                            # Continue button
+                            if st.button("Continue", key="continue_after_capture"):
                                 st.session_state.active_capture_value = None
                                 st.rerun()
                         else:
