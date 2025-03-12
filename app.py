@@ -11,7 +11,7 @@ from streamlit_back_camera_input import back_camera_input
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling with fixes based on component code
+# Add mobile-friendly styling
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -57,18 +57,7 @@ st.markdown("""
         font-weight: bold;
     }
     
-    /* Camera-related CSS fixes based on component code */
-    .stCamera video {
-        width: 100% !important; 
-        height: auto !important;
-        max-height: 400px !important;
-        object-fit: cover !important;
-        cursor: pointer !important;
-        border: 2px solid #e0e0e0 !important;
-        border-radius: 8px !important;
-    }
-    
-    /* Make sure capture button is visible */
+    /* Improved camera prompt */
     .camera-prompt {
         background-color: rgba(0,0,0,0.7);
         color: white;
@@ -303,11 +292,12 @@ def main():
                 # Simple instructions
                 st.info("Position your item and then tap directly on the camera view to capture.")
                 
-                # Add a visual hint below the camera - this will be positioned with CSS
-                st.markdown('<div class="camera-prompt">👆 Tap anywhere on camera to capture</div>', unsafe_allow_html=True)
+                # Add a visual hint
+                st.markdown('<div class="camera-prompt">👆 Tap on the camera to capture</div>', unsafe_allow_html=True)
                 
-                # Use back camera component with empty label
-                photo = back_camera_input("", key=f"cam_{value}")
+                # Use back camera component with specific dimensions
+                # Pass height=400 and width=800 parameters to control the camera size
+                photo = back_camera_input("", key=f"cam_{value}", height=400, width=800)
                 
                 # Cancel button
                 if st.button("Cancel Photo Capture", key=f"cam_cancel_{value}"):
