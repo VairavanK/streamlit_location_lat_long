@@ -11,7 +11,7 @@ from streamlit_back_camera_input import back_camera_input
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add custom component fixes based on deeper understanding of the API
+# Add custom component fixes and performance optimization for geolocation
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -96,6 +96,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }, 1000);
+    
+    // Optimize geolocation by cleaning up previous watchers
+    window.streamlitGeoWatchId = null;
 });
 </script>
 """, unsafe_allow_html=True)
@@ -213,6 +216,123 @@ def filter_values(values, search_term):
     search_term = str(search_term).lower()
     return [v for v in values if search_term in str(v).lower()]
 
+# Optimized geolocation function that uses a custom component to prevent memory leaks
+def get_location_optimized():
+    # Create a custom component with JS code that properly handles geolocation and cleanup
+    loc_html = """
+    <div id="location-container">Getting location...</div>
+    
+    <script>
+    // Function to clean up previous watchers
+    function cleanupGeoWatchers() {
+        if (window.streamlitGeoWatchId !== null && 
+            typeof window.streamlitGeoWatchId !== 'undefined') {
+            navigator.geolocation.clearWatch(window.streamlitGeoWatchId);
+            window.streamlitGeoWatchId = null;
+            console.log("Cleared previous geolocation watcher");
+        }
+    }
+    
+    // Clean up before starting a new one
+    cleanupGeoWatchers();
+    
+    // Function to send data back to Streamlit
+    function sendToStreamlit(data) {
+        const stringData = JSON.stringify(data);
+        window.parent.postMessage({
+            type: 'streamlit:setComponentValue',
+            value: stringData
+        }, '*');
+    }
+    
+    // Handle errors
+    function handleError(error) {
+        console.error("Geolocation error:", error);
+        let errorMessage = "Error getting location: ";
+        
+        switch(error.code) {
+            case error.PERMISSION_DENIED:
+                errorMessage += "Permission denied. Please allow location access.";
+                break;
+            case error.POSITION_UNAVAILABLE:
+                errorMessage += "Position unavailable.";
+                break;
+            case error.TIMEOUT:
+                errorMessage += "Request timed out.";
+                break;
+            default:
+                errorMessage += "Unknown error.";
+                break;
+        }
+        
+        document.getElementById('location-container').textContent = errorMessage;
+        sendToStreamlit({error: errorMessage});
+        
+        // Cleanup after error
+        cleanupGeoWatchers();
+    }
+    
+    // Handle success
+    function handleSuccess(position) {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        
+        document.getElementById('location-container').textContent = 
+            `Location found: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        
+        sendToStreamlit({
+            latitude: lat,
+            longitude: lng
+        });
+        
+        // Cleanup after success
+        cleanupGeoWatchers();
+    }
+    
+    // Get current position with optimized options
+    const options = {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+    };
+    
+    try {
+        if (navigator.geolocation) {
+            // Use getCurrentPosition instead of watchPosition for one-time requests
+            navigator.geolocation.getCurrentPosition(handleSuccess, handleError, options);
+        } else {
+            document.getElementById('location-container').textContent = 
+                "Geolocation is not supported by this browser.";
+            sendToStreamlit({error: "Geolocation not supported"});
+        }
+    } catch (e) {
+        document.getElementById('location-container').textContent = 
+            "Error initializing geolocation: " + e.message;
+        sendToStreamlit({error: e.message});
+    }
+    </script>
+    """
+    
+    # Return results from custom component
+    result = st.components.v1.html(loc_html, height=50, key=f"geo_{uuid.uuid4()}")
+    
+    # Process the result
+    if result:
+        try:
+            import json
+            location_data = json.loads(result)
+            
+            if 'error' in location_data:
+                st.error(location_data['error'])
+                return None
+            else:
+                return location_data.get('latitude'), location_data.get('longitude')
+        except Exception as e:
+            st.error(f"Error processing location data: {e}")
+            return None
+    
+    return None
+
 # Get and save location with optimized performance
 def get_and_save_location(value, prefix=""):
     # Make a unique location request key for this value and prefix
@@ -227,51 +347,27 @@ def get_and_save_location(value, prefix=""):
         # Set flag that we've requested location
         st.session_state.location_requested[loc_request_key] = True
         
-        try:
-            with st.spinner("Getting your location..."):
-                # Use streamlit-js-eval to get location data
-                location_data = get_geolocation()
-                
-                # Better type checking for location_data
-                if location_data is None or not isinstance(location_data, dict):
-                    st.warning("Waiting for location permission... If no prompt appears, please check your browser settings.")
-                    
-                    st.components.v1.html("""
-                    <script>
-                    if (navigator.geolocation) {
-                        document.write("<p>Please allow location access when prompted by your browser.</p>");
-                    } else {
-                        document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
-                    }
-                    </script>
-                    """, height=100)
-                    
-                    # Add cancel option
-                    if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
-                        st.session_state.location_requested[loc_request_key] = False
-                        st.rerun()
-                        
-                elif isinstance(location_data, dict) and 'coords' in location_data:
-                    # We have the location data!
-                    coords = location_data['coords']
-                    latitude = coords['latitude']
-                    longitude = coords['longitude']
-                    
-                    # Save to dataframe
-                    if save_location(value, latitude, longitude):
-                        st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
-                        # Reset flag
-                        st.session_state.location_requested[loc_request_key] = False
-                        return True
-                    else:
-                        st.error("Failed to save location data")
+        with st.spinner("Getting your location..."):
+            # Use our optimized location function
+            location = get_location_optimized()
+            
+            if location:
+                latitude, longitude = location
+                if save_location(value, latitude, longitude):
+                    st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
+                    # Reset flag
+                    st.session_state.location_requested[loc_request_key] = False
+                    return True
                 else:
-                    st.error("Unexpected response from geolocation service.")
-        except Exception as e:
-            st.error(f"Error getting location: {str(e)}")
-            if st.button("Cancel", key=f"{prefix}_error_cancel_{value}"):
-                st.session_state.location_requested[loc_request_key] = False
-                st.rerun()
+                    st.error("Failed to save location data")
+                    st.session_state.location_requested[loc_request_key] = False
+            else:
+                st.warning("Waiting for location. If no prompt appears, please check your browser settings.")
+                
+                # Add cancel option
+                if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
+                    st.session_state.location_requested[loc_request_key] = False
+                    st.rerun()
     
     return False
 
