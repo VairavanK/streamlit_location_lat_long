@@ -121,8 +121,6 @@ if 'location_requested' not in st.session_state:
     st.session_state.location_requested = {}
 if 'temp_photo' not in st.session_state:
     st.session_state.temp_photo = None
-if 'location_cache' not in st.session_state:
-    st.session_state.location_cache = None
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -215,27 +213,7 @@ def filter_values(values, search_term):
     search_term = str(search_term).lower()
     return [v for v in values if search_term in str(v).lower()]
 
-# Function to get location once and use for multiple values
-def get_cached_location():
-    if st.session_state.location_cache is None:
-        try:
-            with st.spinner("Getting your location..."):
-                location_data = get_geolocation()
-                if isinstance(location_data, dict) and 'coords' in location_data:
-                    coords = location_data['coords']
-                    latitude = coords['latitude']
-                    longitude = coords['longitude']
-                    st.session_state.location_cache = (latitude, longitude)
-                    return latitude, longitude
-                else:
-                    return None
-        except Exception as e:
-            st.error(f"Error getting location: {str(e)}")
-            return None
-    else:
-        return st.session_state.location_cache
-
-# Get and save location - optimized version
+# Get and save location with optimized performance
 def get_and_save_location(value, prefix=""):
     # Make a unique location request key for this value and prefix
     loc_request_key = f"{prefix}_{value}"
@@ -249,31 +227,49 @@ def get_and_save_location(value, prefix=""):
         # Set flag that we've requested location
         st.session_state.location_requested[loc_request_key] = True
         
-        # Try to get cached location first
-        location = get_cached_location()
-        if location:
-            latitude, longitude = location
-            if save_location(value, latitude, longitude):
-                st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
-                st.session_state.location_requested[loc_request_key] = False
-                return True
-            else:
-                st.error("Failed to save location data")
-        else:
-            st.warning("Waiting for location permission... If no prompt appears, please check your browser settings.")
-            
-            st.components.v1.html("""
-            <script>
-            if (navigator.geolocation) {
-                document.write("<p>Please allow location access when prompted by your browser.</p>");
-            } else {
-                document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
-            }
-            </script>
-            """, height=100)
-            
-            # Add cancel option
-            if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
+        try:
+            with st.spinner("Getting your location..."):
+                # Use streamlit-js-eval to get location data
+                location_data = get_geolocation()
+                
+                # Better type checking for location_data
+                if location_data is None or not isinstance(location_data, dict):
+                    st.warning("Waiting for location permission... If no prompt appears, please check your browser settings.")
+                    
+                    st.components.v1.html("""
+                    <script>
+                    if (navigator.geolocation) {
+                        document.write("<p>Please allow location access when prompted by your browser.</p>");
+                    } else {
+                        document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
+                    }
+                    </script>
+                    """, height=100)
+                    
+                    # Add cancel option
+                    if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
+                        st.session_state.location_requested[loc_request_key] = False
+                        st.rerun()
+                        
+                elif isinstance(location_data, dict) and 'coords' in location_data:
+                    # We have the location data!
+                    coords = location_data['coords']
+                    latitude = coords['latitude']
+                    longitude = coords['longitude']
+                    
+                    # Save to dataframe
+                    if save_location(value, latitude, longitude):
+                        st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
+                        # Reset flag
+                        st.session_state.location_requested[loc_request_key] = False
+                        return True
+                    else:
+                        st.error("Failed to save location data")
+                else:
+                    st.error("Unexpected response from geolocation service.")
+        except Exception as e:
+            st.error(f"Error getting location: {str(e)}")
+            if st.button("Cancel", key=f"{prefix}_error_cancel_{value}"):
                 st.session_state.location_requested[loc_request_key] = False
                 st.rerun()
     
@@ -411,25 +407,6 @@ def main():
             # Convert to strings to avoid numpy array issues
             unique_values = st.session_state.data[st.session_state.selected_column].astype(str).unique().tolist()
             
-            # Add option to get location for all values at once
-            if st.session_state.location_cache is None:
-                location_col1, location_col2 = st.columns([3, 1])
-                with location_col1:
-                    st.info("💡 You can get your current location once and use it for multiple items")
-                with location_col2:
-                    if st.button("📍 Get Location Once"):
-                        loc = get_cached_location()
-                        if loc:
-                            lat, lng = loc
-                            st.success(f"Location cached: {lat:.6f}, {lng:.6f}")
-                            st.rerun()
-            else:
-                lat, lng = st.session_state.location_cache
-                st.success(f"Current location: {lat:.6f}, {lng:.6f}")
-                if st.button("🔄 Update Location"):
-                    st.session_state.location_cache = None
-                    st.rerun()
-            
             # Search and filter functionality
             search_term = st.text_input("🔍 Search values:", value=st.session_state.search_term)
             if search_term != st.session_state.search_term:
@@ -465,20 +442,6 @@ def main():
             with in_progress_tab:
                 in_progress_values = get_in_progress_values()
                 if in_progress_values:
-                    # Option to apply cached location to all in progress
-                    if st.session_state.location_cache is not None:
-                        lat, lng = st.session_state.location_cache
-                        loc_missing_count = len([v for v in in_progress_values if not st.session_state.progress.get(v, {}).get('location', False)])
-                        if loc_missing_count > 0:
-                            if st.button(f"📍 Apply Current Location to All In-Progress ({loc_missing_count} items)"):
-                                applied_count = 0
-                                for value in in_progress_values:
-                                    if not st.session_state.progress.get(value, {}).get('location', False):
-                                        if save_location(value, lat, lng):
-                                            applied_count += 1
-                                st.success(f"Location applied to {applied_count} values!")
-                                st.rerun()
-
                     for value in in_progress_values:
                         with st.expander(f"{value}"):
                             col1, col2 = st.columns(2)
@@ -540,20 +503,6 @@ def main():
             # All Values Tab
             with all_tab:
                 if len(filtered_values) > 0:
-                    # Option to apply cached location to all values missing location
-                    if st.session_state.location_cache is not None:
-                        lat, lng = st.session_state.location_cache
-                        loc_missing_count = len([v for v in filtered_values if not st.session_state.progress.get(v, {}).get('location', False)])
-                        if loc_missing_count > 0:
-                            if st.button(f"📍 Apply Current Location to All Values Missing Location ({loc_missing_count} items)"):
-                                applied_count = 0
-                                for value in filtered_values:
-                                    if not st.session_state.progress.get(value, {}).get('location', False):
-                                        if save_location(value, lat, lng):
-                                            applied_count += 1
-                                st.success(f"Location applied to {applied_count} values!")
-                                st.rerun()
-                    
                     for value in filtered_values:
                         location_done = st.session_state.progress.get(value, {}).get('location', False)
                         image_done = st.session_state.progress.get(value, {}).get('image', False)
