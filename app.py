@@ -441,7 +441,7 @@ def request_geolocation(value):
                     }
                 </script>
                 """,
-                height=0
+                height=50
             )
             
             # Check URL parameters
