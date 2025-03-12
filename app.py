@@ -11,7 +11,7 @@ from streamlit_back_camera_input import back_camera_input
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add custom component fixes and performance optimization for geolocation
+# Add custom component fixes based on deeper understanding of the API
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -82,25 +82,6 @@ st.markdown("""
         background-color: #f8f9fa;
     }
 </style>
-
-<script>
-// Custom script to ensure camera component frame is visible
-document.addEventListener('DOMContentLoaded', function() {
-    // Set interval to periodically check for iframes and ensure they have enough height
-    setInterval(function() {
-        const iframes = document.querySelectorAll('iframe');
-        iframes.forEach(function(iframe) {
-            if (iframe.height < 300) {
-                iframe.height = 360;
-                iframe.style.minHeight = '360px';
-            }
-        });
-    }, 1000);
-    
-    // Optimize geolocation by cleaning up previous watchers
-    window.streamlitGeoWatchId = null;
-});
-</script>
 """, unsafe_allow_html=True)
 
 # Session state initialization
@@ -216,120 +197,45 @@ def filter_values(values, search_term):
     search_term = str(search_term).lower()
     return [v for v in values if search_term in str(v).lower()]
 
-# Optimized geolocation function that uses a custom component to prevent memory leaks
+# Optimize geolocation with short timeout
 def get_location_optimized():
-    # Create a custom component with JS code that properly handles geolocation and cleanup
-    loc_html = """
-    <div id="location-container">Getting location...</div>
-    
-    <script>
-    // Function to clean up previous watchers
-    function cleanupGeoWatchers() {
-        if (window.streamlitGeoWatchId !== null && 
-            typeof window.streamlitGeoWatchId !== 'undefined') {
-            navigator.geolocation.clearWatch(window.streamlitGeoWatchId);
-            window.streamlitGeoWatchId = null;
-            console.log("Cleared previous geolocation watcher");
-        }
-    }
-    
-    // Clean up before starting a new one
-    cleanupGeoWatchers();
-    
-    // Function to send data back to Streamlit
-    function sendToStreamlit(data) {
-        const stringData = JSON.stringify(data);
-        window.parent.postMessage({
-            type: 'streamlit:setComponentValue',
-            value: stringData
-        }, '*');
-    }
-    
-    // Handle errors
-    function handleError(error) {
-        console.error("Geolocation error:", error);
-        let errorMessage = "Error getting location: ";
-        
-        switch(error.code) {
-            case error.PERMISSION_DENIED:
-                errorMessage += "Permission denied. Please allow location access.";
-                break;
-            case error.POSITION_UNAVAILABLE:
-                errorMessage += "Position unavailable.";
-                break;
-            case error.TIMEOUT:
-                errorMessage += "Request timed out.";
-                break;
-            default:
-                errorMessage += "Unknown error.";
-                break;
+    # Try to get location with streamlit_js_eval but with a short timeout
+    try:
+        # Use one-time geolocation without caching or watching
+        st.components.v1.html("""
+        <div id="geo-status">Requesting location...</div>
+        <script>
+        // Clear any previous geolocation requests
+        if (window.geoWatchId) {
+            navigator.geolocation.clearWatch(window.geoWatchId);
+            window.geoWatchId = null;
         }
         
-        document.getElementById('location-container').textContent = errorMessage;
-        sendToStreamlit({error: errorMessage});
+        // Request location with quick timeout
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                document.getElementById('geo-status').textContent = 'Location acquired!';
+            },
+            function(error) {
+                document.getElementById('geo-status').textContent = 'Error: ' + error.message;
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 5000,
+                maximumAge: 0
+            }
+        );
+        </script>
+        """, height=50)
         
-        // Cleanup after error
-        cleanupGeoWatchers();
-    }
-    
-    // Handle success
-    function handleSuccess(position) {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
+        # Now get the actual location data with streamlit_js_eval
+        location_data = get_geolocation()
         
-        document.getElementById('location-container').textContent = 
-            `Location found: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-        
-        sendToStreamlit({
-            latitude: lat,
-            longitude: lng
-        });
-        
-        // Cleanup after success
-        cleanupGeoWatchers();
-    }
-    
-    // Get current position with optimized options
-    const options = {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-    };
-    
-    try {
-        if (navigator.geolocation) {
-            // Use getCurrentPosition instead of watchPosition for one-time requests
-            navigator.geolocation.getCurrentPosition(handleSuccess, handleError, options);
-        } else {
-            document.getElementById('location-container').textContent = 
-                "Geolocation is not supported by this browser.";
-            sendToStreamlit({error: "Geolocation not supported"});
-        }
-    } catch (e) {
-        document.getElementById('location-container').textContent = 
-            "Error initializing geolocation: " + e.message;
-        sendToStreamlit({error: e.message});
-    }
-    </script>
-    """
-    
-    # Return results from custom component
-    result = st.components.v1.html(loc_html, height=50, key=f"geo_{uuid.uuid4()}")
-    
-    # Process the result
-    if result:
-        try:
-            import json
-            location_data = json.loads(result)
-            
-            if 'error' in location_data:
-                st.error(location_data['error'])
-                return None
-            else:
-                return location_data.get('latitude'), location_data.get('longitude')
-        except Exception as e:
-            st.error(f"Error processing location data: {e}")
-            return None
+        if isinstance(location_data, dict) and 'coords' in location_data:
+            coords = location_data['coords']
+            return coords['latitude'], coords['longitude']
+    except Exception as e:
+        st.error(f"Error getting location: {e}")
     
     return None
 
@@ -347,33 +253,72 @@ def get_and_save_location(value, prefix=""):
         # Set flag that we've requested location
         st.session_state.location_requested[loc_request_key] = True
         
-        with st.spinner("Getting your location..."):
-            # Use our optimized location function
-            location = get_location_optimized()
-            
-            if location:
-                latitude, longitude = location
-                if save_location(value, latitude, longitude):
-                    st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
-                    # Reset flag
-                    st.session_state.location_requested[loc_request_key] = False
-                    return True
-                else:
-                    st.error("Failed to save location data")
-                    st.session_state.location_requested[loc_request_key] = False
-            else:
-                st.warning("Waiting for location. If no prompt appears, please check your browser settings.")
+        try:
+            with st.spinner("Getting your location..."):
+                # Use streamlit-js-eval to get location data
+                location_data = get_geolocation()
                 
-                # Add cancel option
-                if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
-                    st.session_state.location_requested[loc_request_key] = False
-                    st.rerun()
+                # Better type checking for location_data
+                if location_data is None or not isinstance(location_data, dict):
+                    st.warning("Waiting for location permission... If no prompt appears, please check your browser settings.")
+                    
+                    st.components.v1.html("""
+                    <script>
+                    if (navigator.geolocation) {
+                        document.write("<p>Please allow location access when prompted by your browser.</p>");
+                    } else {
+                        document.write("<p style='color:red;'>Your browser doesn't support geolocation.</p>");
+                    }
+                    </script>
+                    """, height=100)
+                    
+                    # Add cancel option
+                    if st.button("Cancel", key=f"{prefix}_cancel_loc_{value}"):
+                        st.session_state.location_requested[loc_request_key] = False
+                        st.rerun()
+                elif isinstance(location_data, dict) and 'coords' in location_data:
+                    # We have the location data!
+                    coords = location_data['coords']
+                    latitude = coords['latitude']
+                    longitude = coords['longitude']
+                    
+                    # Save to dataframe
+                    if save_location(value, latitude, longitude):
+                        st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
+                        # Reset flag
+                        st.session_state.location_requested[loc_request_key] = False
+                        return True
+                    else:
+                        st.error("Failed to save location data")
+                else:
+                    st.error("Unexpected response from geolocation service.")
+        except Exception as e:
+            st.error(f"Error getting location: {str(e)}")
+            if st.button("Cancel", key=f"{prefix}_error_cancel_{value}"):
+                st.session_state.location_requested[loc_request_key] = False
+                st.rerun()
     
     return False
 
 # Main app
 def main():
     st.title("Data Enrichment with Location and Images")
+    
+    # Add a small HTML snippet to clean up geolocation listeners on page load
+    st.components.v1.html("""
+    <script>
+    // Clean up any lingering geolocation watchers on page load/refresh
+    document.addEventListener('DOMContentLoaded', function() {
+        if (navigator.geolocation && navigator.geolocation.clearWatch) {
+            // Try to clear a bunch of potential watch IDs to clean up
+            for (let i = 0; i < 100; i++) {
+                navigator.geolocation.clearWatch(i);
+            }
+            console.log("Cleared potential geolocation watchers");
+        }
+    });
+    </script>
+    """, height=0)
     
     # Step 1: Upload CSV file
     if st.session_state.data is None:
@@ -451,7 +396,7 @@ def main():
                             # Store the photo temporarily for preview
                             st.session_state.temp_photo = photo.getvalue()
                             
-                            # Display preview - using use_container_width instead of use_column_width
+                            # Display preview with container width
                             img = Image.open(BytesIO(st.session_state.temp_photo))
                             st.image(img, use_container_width=True, caption="Current capture")
                             
@@ -473,7 +418,7 @@ def main():
                         except Exception as e:
                             st.error(f"Error processing photo: {e}")
                     elif st.session_state.temp_photo is not None:
-                        # Display previously captured photo - using use_container_width instead of use_column_width
+                        # Display previously captured photo with container width
                         img = Image.open(BytesIO(st.session_state.temp_photo))
                         st.image(img, use_container_width=True, caption="Current capture")
                         
