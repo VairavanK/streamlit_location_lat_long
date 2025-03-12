@@ -6,7 +6,7 @@ from io import BytesIO
 import uuid
 from PIL import Image
 from streamlit_js_eval import get_geolocation
-from streamlit_back_camera import camera_input  # Import the back camera component
+from streamlit_back_camera_input import back_camera_input  # Import the back camera component
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
@@ -283,7 +283,7 @@ def main():
                 st.subheader(f"Taking Photo for: {value}")
                 
                 # Use back camera component instead of standard camera input
-                photo = camera_input("Camera", key=f"cam_{value}")
+                photo = back_camera_input("Camera", key=f"cam_{value}")
                 
                 # Cancel button
                 if st.button("Cancel", key=f"cam_cancel_{value}"):
