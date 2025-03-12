@@ -11,7 +11,7 @@ from streamlit_back_camera_input import back_camera_input  # Import the back cam
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
 
-# Add mobile-friendly styling with improved camera interface
+# Add mobile-friendly styling with fixes for back camera component
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -57,56 +57,84 @@ st.markdown("""
         font-weight: bold;
     }
     
-    /* Fix for camera container - make it taller */
+    /* Critical fixes for back camera display */
     .stCamera {
-        min-height: 500px !important;
+        min-height: 480px !important;
+        overflow: visible !important;
     }
     
-    /* Fix for camera aspect ratio and size */
-    .stCamera > div {
+    .stCamera > div:first-child {
+        height: auto !important;
         min-height: 400px !important;
+        overflow: visible !important;
     }
     
-    /* Make the video element larger and fix aspect ratio */
+    /* Fix camera video element */
     .stCamera video {
-        aspect-ratio: 4/3 !important;
-        min-height: 400px !important;
+        height: 400px !important;
         width: 100% !important;
         object-fit: cover !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
     
-    /* Make the capture button more visible */
+    /* Make camera controls visible */
     .stCamera button {
-        background-color: #f44336 !important;
-        border-radius: 50% !important;
+        display: block !important;
         width: 60px !important;
         height: 60px !important;
-        position: relative;
-        bottom: 80px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 1000;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3) !important;
+        margin: 10px auto !important;
+        background-color: red !important;
+        border-radius: 50% !important;
+        opacity: 1 !important;
+        position: relative !important;
+        z-index: 1000 !important;
+        border: 3px solid white !important;
     }
     
-    /* Add visual indicators */
-    .stCamera::after {
-        content: "👆 Tap to capture";
-        display: block;
-        text-align: center;
-        font-size: 16px;
-        font-weight: bold;
-        color: white;
-        background-color: rgba(0,0,0,0.6);
-        padding: 10px;
+    /* Camera prompt text */
+    .camera-prompt {
         position: relative;
-        bottom: 150px;
-        margin: 0 auto;
-        width: 150px;
+        margin-top: -70px;
+        margin-bottom: 20px;
+        text-align: center;
+        color: white;
+        background-color: rgba(0,0,0,0.7);
+        padding: 8px 16px;
         border-radius: 20px;
-        z-index: 999;
+        width: fit-content;
+        margin-left: auto;
+        margin-right: auto;
+        font-weight: bold;
+        z-index: 1001;
+    }
+    
+    /* Fix for streamlit-back-camera-input */
+    /* This is critical to fix the aspect ratio issue */
+    .element-container:has(.stCamera) {
+        height: auto !important;
+        min-height: 480px !important;
     }
 </style>
+<script>
+// Add a custom script to help with camera button visibility
+document.addEventListener('DOMContentLoaded', function() {
+    // Function to make camera button more visible
+    function fixCameraButton() {
+        const cameraButtons = document.querySelectorAll('.stCamera button');
+        cameraButtons.forEach(button => {
+            button.style.backgroundColor = 'red';
+            button.style.opacity = '1';
+            button.style.position = 'relative';
+            button.style.zIndex = '1000';
+        });
+    }
+    
+    // Run initially and then periodically to catch any dynamically added elements
+    fixCameraButton();
+    setInterval(fixCameraButton, 1000);
+});
+</script>
 """, unsafe_allow_html=True)
 
 # Session state initialization
@@ -327,16 +355,25 @@ def main():
                 value = st.session_state.active_capture_value
                 st.subheader(f"Taking Photo for: {value}")
                 
+                # Info before camera
                 st.info("Please position the item in view and tap to take a photo")
                 
-                # Clear space around camera to make it more prominent
+                # Create a container for the camera with proper spacing
+                with st.container():
+                    # Empty space to help with layout
+                    st.write("")
+                    
+                    # Use back camera component
+                    photo = back_camera_input("", key=f"cam_{value}")
+                    
+                    # Add help text that should appear below the camera
+                    st.markdown('<div class="camera-prompt">Tap to capture</div>', unsafe_allow_html=True)
+                
+                # Empty space for better layout
                 st.write("")
                 
-                # Use back camera component
-                photo = back_camera_input("", key=f"cam_{value}")
-                
                 # Large cancel button below camera
-                if st.button("✖️ CANCEL", key=f"cam_cancel_{value}", help="Cancel and go back"):
+                if st.button("✖️ Cancel Photo Capture", key=f"cam_cancel_{value}"):
                     st.session_state.active_capture_value = None
                     st.rerun()
                 
