@@ -17,6 +17,15 @@ st.set_page_config(page_title="Data Enrichment App", layout="wide")
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
+    /* Reduce space after title */
+    .main .block-container {
+        padding-top: 1rem;
+    }
+    
+    h1 {
+        margin-bottom: 0.5rem !important;
+    }
+
     /* Mobile-friendly styling */
     @media (max-width: 768px) {
         .stButton button {
@@ -107,6 +116,8 @@ if 'location_requested' not in st.session_state:
     st.session_state.location_requested = {}
 if 'temp_photo' not in st.session_state:
     st.session_state.temp_photo = None
+if 'open_expanders' not in st.session_state:
+    st.session_state.open_expanders = set()
 
 # Constants
 SAVE_FILE_PATH = "app_state.json"
@@ -227,7 +238,7 @@ def get_csv_download_link(df):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="big-camera-button">Download Enriched CSV</a>'
     return href
 
-# Save location data (modified to save state)
+# Save location data (modified to keep expanders open until both are captured)
 def save_location(value, lat, lng):
     if st.session_state.location_column is None:
         st.session_state.location_column = f"{st.session_state.selected_column}_location"
@@ -239,11 +250,20 @@ def save_location(value, lat, lng):
     if not row_idx.empty:
         st.session_state.data.loc[row_idx, st.session_state.location_column] = f"{lat}, {lng}"
         st.session_state.progress[value]['location'] = True
+        
+        # Add to open expanders if image isn't captured yet
+        if not st.session_state.progress[value]['image']:
+            st.session_state.open_expanders.add(value)
+        else:
+            # Both are complete, so remove from open expanders
+            if value in st.session_state.open_expanders:
+                st.session_state.open_expanders.remove(value)
+                
         save_app_state()  # Save state after location update
         return True
     return False
 
-# Save image data as base64 encoded string (modified to save state)
+# Save image data as base64 encoded string (modified to keep expanders open until both are captured)
 def save_image(value, image_data):
     if st.session_state.image_column is None:
         st.session_state.image_column = f"{st.session_state.selected_column}_image"
@@ -261,6 +281,15 @@ def save_image(value, image_data):
                 # Store base64 image directly in the dataframe
                 st.session_state.data.loc[row_idx, st.session_state.image_column] = base64_image
                 st.session_state.progress[value]['image'] = True
+                
+                # Add to open expanders if location isn't captured yet
+                if not st.session_state.progress[value]['location']:
+                    st.session_state.open_expanders.add(value)
+                else:
+                    # Both are complete, so remove from open expanders
+                    if value in st.session_state.open_expanders:
+                        st.session_state.open_expanders.remove(value)
+                
                 save_app_state()  # Save state after image update
                 return True
         else:
@@ -568,7 +597,10 @@ def main():
                 in_progress_values = get_in_progress_values()
                 if in_progress_values:
                     for value in in_progress_values:
-                        with st.expander(f"{value}"):
+                        # Determine if this expander should be expanded
+                        is_expanded = value in st.session_state.open_expanders
+                        
+                        with st.expander(f"{value}", expanded=is_expanded):
                             col1, col2 = st.columns(2)
                             
                             with col1:
@@ -577,8 +609,7 @@ def main():
                                 
                                 # Only show location button if location not captured yet
                                 if not st.session_state.progress.get(value, {}).get('location', False):
-                                    if get_and_save_location(value, prefix="ip"):
-                                        st.rerun()
+                                    get_and_save_location(value, prefix="ip")
                             
                             with col2:
                                 img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
@@ -589,6 +620,7 @@ def main():
                                     if st.button(f"📸 Take Photo", key=f"ip_activate_{value}"):
                                         st.session_state.active_capture_value = value
                                         st.session_state.temp_photo = None
+                                        st.session_state.open_expanders.add(value)
                                         st.rerun()
                 else:
                     if st.session_state.search_term:
@@ -633,7 +665,10 @@ def main():
                         image_done = st.session_state.progress.get(value, {}).get('image', False)
                         status = "✅" if location_done and image_done else "🔄"
                         
-                        with st.expander(f"{value} {status}"):
+                        # Determine if this expander should be expanded
+                        is_expanded = value in st.session_state.open_expanders
+                        
+                        with st.expander(f"{value} {status}", expanded=is_expanded):
                             col1, col2 = st.columns(2)
                             
                             with col1:
@@ -642,8 +677,7 @@ def main():
                                 
                                 if not location_done:
                                     # Use a different prefix for all_tab to create unique keys
-                                    if get_and_save_location(value, prefix="all"):
-                                        st.rerun()
+                                    get_and_save_location(value, prefix="all")
                                 else:
                                     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
                                     loc_col = st.session_state.location_column
@@ -659,6 +693,7 @@ def main():
                                     if st.button(f"📸 Take Photo", key=f"all_activate_{value}"):
                                         st.session_state.active_capture_value = value
                                         st.session_state.temp_photo = None
+                                        st.session_state.open_expanders.add(value)
                                         st.rerun()
                                 else:
                                     row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
