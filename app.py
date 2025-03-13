@@ -7,6 +7,8 @@ import uuid
 from PIL import Image
 from streamlit_js_eval import get_geolocation
 from streamlit_back_camera_input import back_camera_input
+import json
+from streamlit_ws_localstorage import streamlit_ws_localstorage  # Import for localStorage
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
@@ -106,6 +108,61 @@ if 'location_requested' not in st.session_state:
 if 'temp_photo' not in st.session_state:
     st.session_state.temp_photo = None
 
+# Function to save app state to localStorage
+def save_app_state():
+    """Save current app state to localStorage"""
+    if st.session_state.data is not None:
+        try:
+            # Convert dataframe to JSON
+            data_json = st.session_state.data.to_json()
+            
+            # Create state object
+            state = {
+                'data': data_json,
+                'selected_column': st.session_state.selected_column,
+                'location_column': st.session_state.location_column,
+                'image_column': st.session_state.image_column,
+                'progress': st.session_state.progress,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Save to localStorage
+            streamlit_ws_localstorage(key="app_state", value=json.dumps(state))
+            return True
+        except Exception as e:
+            st.error(f"Error saving state: {e}")
+            return False
+    return False
+
+# Function to load app state from localStorage
+def load_app_state():
+    """Load app state from localStorage"""
+    try:
+        # Get state from localStorage
+        state_json = streamlit_ws_localstorage(key="app_state")
+        
+        if state_json:
+            state = json.loads(state_json)
+            if 'data' in state:
+                # Restore dataframe
+                st.session_state.data = pd.read_json(state['data'])
+                
+                # Restore other session state variables
+                st.session_state.selected_column = state['selected_column']
+                st.session_state.location_column = state['location_column']
+                st.session_state.image_column = state['image_column']
+                st.session_state.progress = state['progress']
+                
+                return True
+    except Exception as e:
+        st.error(f"Error loading saved state: {e}")
+    return False
+
+# Function to clear saved state from localStorage
+def clear_saved_state():
+    """Clear saved state from localStorage"""
+    streamlit_ws_localstorage(key="app_state", value="", clear=True)
+
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
     try:
@@ -143,7 +200,7 @@ def get_csv_download_link(df):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="big-camera-button">Download Enriched CSV</a>'
     return href
 
-# Save location data
+# Save location data (modified to save state)
 def save_location(value, lat, lng):
     if st.session_state.location_column is None:
         st.session_state.location_column = f"{st.session_state.selected_column}_location"
@@ -155,10 +212,11 @@ def save_location(value, lat, lng):
     if not row_idx.empty:
         st.session_state.data.loc[row_idx, st.session_state.location_column] = f"{lat}, {lng}"
         st.session_state.progress[value]['location'] = True
+        save_app_state()  # Save state after location update
         return True
     return False
 
-# Save image data as base64 encoded string
+# Save image data as base64 encoded string (modified to save state)
 def save_image(value, image_data):
     if st.session_state.image_column is None:
         st.session_state.image_column = f"{st.session_state.selected_column}_image"
@@ -176,6 +234,7 @@ def save_image(value, image_data):
                 # Store base64 image directly in the dataframe
                 st.session_state.data.loc[row_idx, st.session_state.image_column] = base64_image
                 st.session_state.progress[value]['image'] = True
+                save_app_state()  # Save state after image update
                 return True
         else:
             st.error("Failed to process image")
@@ -291,7 +350,35 @@ def main():
     </script>
     """, height=0)
     
-    # Step 1: Upload CSV file
+    # Step 1: Check for saved state when the app starts
+    if st.session_state.data is None:
+        # Check if there's a saved state available
+        state_json = streamlit_ws_localstorage(key="app_state")
+        
+        if state_json:
+            try:
+                state = json.loads(state_json)
+                if 'timestamp' in state:
+                    # Show option to restore
+                    timestamp = datetime.fromisoformat(state['timestamp']).strftime("%Y-%m-%d %H:%M:%S")
+                    st.info(f"Found saved session from {timestamp}. Would you like to restore it?")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Yes, restore session"):
+                            if load_app_state():
+                                st.success("Session restored successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to restore session.")
+                    with col2:
+                        if st.button("No, start fresh"):
+                            clear_saved_state()
+                            st.rerun()
+            except Exception as e:
+                st.error(f"Error checking saved state: {e}")
+    
+    # Step 1: Upload CSV file (modified to save state)
     if st.session_state.data is None:
         uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
         
@@ -299,10 +386,11 @@ def main():
             try:
                 st.session_state.data = pd.read_csv(uploaded_file)
                 st.success("CSV file uploaded successfully!")
+                save_app_state()  # Save state after CSV is loaded
             except Exception as e:
                 st.error(f"Error: {e}")
     
-    # Step 2: Column selection
+    # Step 2: Column selection (modified to save state)
     if st.session_state.data is not None:
         if st.session_state.selected_column is None:
             st.write("Preview of your data:")
@@ -323,6 +411,7 @@ def main():
                     if value not in st.session_state.camera_active:
                         st.session_state.camera_active[value] = False
                 
+                save_app_state()  # Save state after column selection
                 st.rerun()
         
         # Step 3: Enrich each value
@@ -573,8 +662,10 @@ def main():
             if st.button("Prepare Download"):
                 st.markdown(get_csv_download_link(st.session_state.data), unsafe_allow_html=True)
                 
-            # Option to start over
+            # Option to start over (modified to clear localStorage)
             if st.button("Start Over (Clear Session)"):
+                # Clear the localStorage
+                clear_saved_state()
                 # Clear the session state
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
