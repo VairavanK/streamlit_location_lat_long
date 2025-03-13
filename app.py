@@ -118,6 +118,8 @@ if 'temp_photo' not in st.session_state:
     st.session_state.temp_photo = None
 if 'open_expanders' not in st.session_state:
     st.session_state.open_expanders = set()
+if 'location_saved' not in st.session_state:
+    st.session_state.location_saved = False
 
 # Constants
 SAVE_FILE_PATH = "app_state.json"
@@ -238,7 +240,7 @@ def get_csv_download_link(df):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" class="big-camera-button">Download Enriched CSV</a>'
     return href
 
-# Save location data (modified to keep expanders open until both are captured)
+# Save location data
 def save_location(value, lat, lng):
     if st.session_state.location_column is None:
         st.session_state.location_column = f"{st.session_state.selected_column}_location"
@@ -251,7 +253,10 @@ def save_location(value, lat, lng):
         st.session_state.data.loc[row_idx, st.session_state.location_column] = f"{lat}, {lng}"
         st.session_state.progress[value]['location'] = True
         
-        # Add to open expanders if image isn't captured yet
+        # Set flag to show success message
+        st.session_state.location_saved = True
+        
+        # Keep track of open expanders
         if not st.session_state.progress[value]['image']:
             st.session_state.open_expanders.add(value)
         else:
@@ -263,7 +268,7 @@ def save_location(value, lat, lng):
         return True
     return False
 
-# Save image data as base64 encoded string (modified to keep expanders open until both are captured)
+# Save image data as base64 encoded string
 def save_image(value, image_data):
     if st.session_state.image_column is None:
         st.session_state.image_column = f"{st.session_state.selected_column}_image"
@@ -282,7 +287,7 @@ def save_image(value, image_data):
                 st.session_state.data.loc[row_idx, st.session_state.image_column] = base64_image
                 st.session_state.progress[value]['image'] = True
                 
-                # Add to open expanders if location isn't captured yet
+                # Keep track of open expanders
                 if not st.session_state.progress[value]['location']:
                     st.session_state.open_expanders.add(value)
                 else:
@@ -320,6 +325,12 @@ def get_and_save_location(value, prefix=""):
     # If we haven't already requested location for this key
     if loc_request_key not in st.session_state.location_requested:
         st.session_state.location_requested[loc_request_key] = False
+    
+    # Check if we just saved a location during this run
+    if st.session_state.location_saved:
+        st.success("Location saved successfully!")
+        st.session_state.location_saved = False
+        # Don't return yet - continue showing the updated UI with checkmark
     
     # Button to get location OR continue if already requested
     if st.button(f"📍 Get Location", key=f"{prefix}_getloc_{value}") or st.session_state.location_requested[loc_request_key]:
@@ -370,10 +381,11 @@ def get_and_save_location(value, prefix=""):
                     
                     # Save to dataframe
                     if save_location(value, latitude, longitude):
-                        st.success(f"Location saved: {latitude:.6f}, {longitude:.6f}")
+                        # The success message will be shown on the next run
                         # Reset flag
                         st.session_state.location_requested[loc_request_key] = False
-                        return True
+                        # Force a rerun to update the UI with the location saved
+                        st.rerun()  
                     else:
                         st.error("Failed to save location data")
                 else:
@@ -384,11 +396,39 @@ def get_and_save_location(value, prefix=""):
                 st.session_state.location_requested[loc_request_key] = False
                 st.rerun()
     
-    return False
+    # Return whether the location is already saved to indicate status in UI
+    return st.session_state.progress.get(value, {}).get('location', False)
+
+# Add script to handle scroll position
+def add_scroll_management_script():
+    st.components.v1.html("""
+    <script>
+    // Store scroll position before page reloads
+    window.addEventListener('beforeunload', function() {
+        localStorage.setItem('scrollPosition', window.scrollY);
+    });
+    
+    // Restore scroll position after page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        let scrollPos = localStorage.getItem('scrollPosition');
+        if (scrollPos) {
+            // Use a short delay to ensure the DOM is fully rendered
+            setTimeout(function() {
+                window.scrollTo(0, parseInt(scrollPos));
+                // Clear stored position to prevent unwanted scrolling on manual refreshes
+                localStorage.removeItem('scrollPosition');
+            }, 200);
+        }
+    });
+    </script>
+    """, height=0)
 
 # Main app
 def main():
     st.title("Data Enrichment with Location and Images")
+    
+    # Add scroll position management
+    add_scroll_management_script()
     
     # Add a small HTML snippet to clean up geolocation listeners on page load
     st.components.v1.html("""
@@ -604,12 +644,21 @@ def main():
                             col1, col2 = st.columns(2)
                             
                             with col1:
-                                loc_status = "✅" if st.session_state.progress.get(value, {}).get('location', False) else "❌"
+                                # Get current location status for this value
+                                location_done = st.session_state.progress.get(value, {}).get('location', False)
+                                loc_status = "✅" if location_done else "❌"
                                 st.write(f"Location: {loc_status}")
                                 
                                 # Only show location button if location not captured yet
-                                if not st.session_state.progress.get(value, {}).get('location', False):
+                                if not location_done:
                                     get_and_save_location(value, prefix="ip")
+                                else:
+                                    # Show saved location
+                                    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
+                                    loc_col = st.session_state.location_column
+                                    if loc_col and loc_col in st.session_state.data.columns:
+                                        loc_data = st.session_state.data.loc[row_idx, loc_col]
+                                        st.write(f"Saved location: {loc_data}")
                             
                             with col2:
                                 img_status = "✅" if st.session_state.progress.get(value, {}).get('image', False) else "❌"
@@ -622,6 +671,13 @@ def main():
                                         st.session_state.temp_photo = None
                                         st.session_state.open_expanders.add(value)
                                         st.rerun()
+                                else:
+                                    # Show saved image
+                                    row_idx = st.session_state.data[st.session_state.data[st.session_state.selected_column].astype(str) == value].index[0]
+                                    img_col = st.session_state.image_column
+                                    if img_col and img_col in st.session_state.data.columns:
+                                        base64_image = st.session_state.data.loc[row_idx, img_col]
+                                        display_image_from_base64(base64_image)
                 else:
                     if st.session_state.search_term:
                         st.info(f"No in-progress values match your search: '{st.session_state.search_term}'")
@@ -728,6 +784,12 @@ def main():
                 # Clear the session state
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
+                # Also clear localStorage scroll position
+                st.components.v1.html("""
+                <script>
+                localStorage.removeItem('scrollPosition');
+                </script>
+                """, height=0)
                 st.rerun()
 
 # Run the app
