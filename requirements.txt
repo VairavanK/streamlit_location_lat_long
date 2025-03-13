@@ -4,3 +4,4 @@ pillow
 numpy
 streamlit-js-eval
 streamlit-back-camera-input
+streamlit_ws_localstorage
