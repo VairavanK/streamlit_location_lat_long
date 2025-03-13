@@ -11,7 +11,80 @@ import json
 import os
 
 # Set page config
-st.set_page_config(page_title="OPM Location Tagging", layout="wide")
+st.set_page_config(page_title="Data Enrichment App", layout="wide")
+
+# Add custom component fixes based on deeper understanding of the API
+st.markdown("""
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+    /* Mobile-friendly styling */
+    @media (max-width: 768px) {
+        .stButton button {
+            width: 100%;
+            padding: 15px 0;
+            margin-bottom: 10px;
+        }
+        
+        /* Make the app full width on mobile */
+        .main .block-container {
+            padding-left: 5px;
+            padding-right: 5px;
+            max-width: 100%;
+        }
+        
+        /* Make expanders more touch-friendly */
+        .streamlit-expanderHeader {
+            font-size: 1.2rem;
+            padding: 12px 0;
+        }
+    }
+    
+    /* Enhanced download button */
+    .big-camera-button {
+        display: block;
+        width: 100%;
+        padding: 15px;
+        background-color: #1E88E5;
+        color: white;
+        text-align: center;
+        font-size: 16px;
+        margin-top: 10px;
+        border-radius: 5px;
+        cursor: pointer;
+        text-decoration: none;
+    }
+
+    /* Standard button styling */
+    .stButton > button {
+        font-weight: bold;
+    }
+    
+    /* Improved camera prompt */
+    .camera-prompt {
+        background-color: rgba(0,0,0,0.7);
+        color: white;
+        text-align: center;
+        padding: 8px 16px;
+        font-size: 16px;
+        border-radius: 20px;
+        margin: 10px auto;
+        width: fit-content;
+    }
+    
+    /* Give more room for the camera component */
+    [data-testid="stVerticalBlock"] iframe {
+        min-height: 360px !important;
+    }
+    
+    /* Preview image styling */
+    .preview-image {
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 5px;
+        background-color: #f8f9fa;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Session state initialization
 if 'data' not in st.session_state:
