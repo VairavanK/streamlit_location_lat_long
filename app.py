@@ -8,7 +8,7 @@ from PIL import Image
 from streamlit_js_eval import get_geolocation
 from streamlit_back_camera_input import back_camera_input
 import json
-from streamlit_ws_localstorage import streamlit_ws_localstorage  # Import for localStorage
+import os
 
 # Set page config
 st.set_page_config(page_title="Data Enrichment App", layout="wide")
@@ -108,9 +108,12 @@ if 'location_requested' not in st.session_state:
 if 'temp_photo' not in st.session_state:
     st.session_state.temp_photo = None
 
-# Function to save app state to localStorage
+# Constants
+SAVE_FILE_PATH = "app_state.json"
+
+# Function to save app state to file
 def save_app_state():
-    """Save current app state to localStorage"""
+    """Save current app state to file"""
     if st.session_state.data is not None:
         try:
             # Convert dataframe to JSON
@@ -126,42 +129,66 @@ def save_app_state():
                 'timestamp': datetime.now().isoformat()
             }
             
-            # Save to localStorage
-            streamlit_ws_localstorage(key="app_state", value=json.dumps(state))
+            # Save to file
+            with open(SAVE_FILE_PATH, 'w') as f:
+                json.dump(state, f)
             return True
         except Exception as e:
             st.error(f"Error saving state: {e}")
             return False
     return False
 
-# Function to load app state from localStorage
+# Function to load app state from file
 def load_app_state():
-    """Load app state from localStorage"""
+    """Load app state from file"""
     try:
-        # Get state from localStorage
-        state_json = streamlit_ws_localstorage(key="app_state")
-        
-        if state_json:
-            state = json.loads(state_json)
-            if 'data' in state:
-                # Restore dataframe
-                st.session_state.data = pd.read_json(state['data'])
+        if os.path.exists(SAVE_FILE_PATH):
+            with open(SAVE_FILE_PATH, 'r') as f:
+                state = json.load(f)
                 
-                # Restore other session state variables
-                st.session_state.selected_column = state['selected_column']
-                st.session_state.location_column = state['location_column']
-                st.session_state.image_column = state['image_column']
-                st.session_state.progress = state['progress']
-                
-                return True
+                if 'data' in state:
+                    # Restore dataframe
+                    st.session_state.data = pd.read_json(state['data'])
+                    
+                    # Restore other session state variables
+                    st.session_state.selected_column = state['selected_column']
+                    st.session_state.location_column = state['location_column']
+                    st.session_state.image_column = state['image_column']
+                    st.session_state.progress = state['progress']
+                    
+                    return True
     except Exception as e:
         st.error(f"Error loading saved state: {e}")
     return False
 
-# Function to clear saved state from localStorage
+# Function to check if a saved state exists
+def saved_state_exists():
+    """Check if a saved state exists"""
+    return os.path.exists(SAVE_FILE_PATH)
+
+# Function to get saved state timestamp
+def get_saved_state_timestamp():
+    """Get the timestamp of the saved state"""
+    try:
+        if saved_state_exists():
+            with open(SAVE_FILE_PATH, 'r') as f:
+                state = json.load(f)
+                if 'timestamp' in state:
+                    return datetime.fromisoformat(state['timestamp']).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        pass
+    return None
+
+# Function to clear saved state
 def clear_saved_state():
-    """Clear saved state from localStorage"""
-    streamlit_ws_localstorage(key="app_state", value="", clear=True)
+    """Clear saved state file"""
+    if saved_state_exists():
+        try:
+            os.remove(SAVE_FILE_PATH)
+            return True
+        except Exception:
+            return False
+    return True
 
 # Function to compress and encode image to base64
 def compress_and_encode_image(image_data, max_size=(800, 800), quality=75):
@@ -353,14 +380,11 @@ def main():
     # Step 1: Check for saved state when the app starts
     if st.session_state.data is None:
         # Check if there's a saved state available
-        state_json = streamlit_ws_localstorage(key="app_state")
-        
-        if state_json:
+        if saved_state_exists():
             try:
-                state = json.loads(state_json)
-                if 'timestamp' in state:
-                    # Show option to restore
-                    timestamp = datetime.fromisoformat(state['timestamp']).strftime("%Y-%m-%d %H:%M:%S")
+                # Show option to restore
+                timestamp = get_saved_state_timestamp()
+                if timestamp:
                     st.info(f"Found saved session from {timestamp}. Would you like to restore it?")
                     
                     col1, col2 = st.columns(2)
@@ -664,7 +688,7 @@ def main():
                 
             # Option to start over (modified to clear localStorage)
             if st.button("Start Over (Clear Session)"):
-                # Clear the localStorage
+                # Clear the saved state file
                 clear_saved_state()
                 # Clear the session state
                 for key in list(st.session_state.keys()):
